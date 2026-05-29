@@ -234,6 +234,93 @@ h1 {
   width: 7%;
 }
 
+.sales-data-table {
+  width: max-content;
+  min-width: max(1180px, 100%);
+  table-layout: auto;
+}
+
+.sales-data-table th,
+.sales-data-table td {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.sales-data-table th:first-child,
+.sales-data-table td:first-child {
+  width: auto;
+}
+
+.sales-data-table th:nth-child(10),
+.sales-data-table td:nth-child(10) {
+  text-align: right;
+}
+
+.sales-return-panel {
+  padding: 16px 18px 18px;
+  border-top: 1px solid var(--line);
+  background: rgba(245, 247, 244, 0.46);
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.section-heading strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.compact-table-wrap {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.sales-return-table {
+  min-width: 900px;
+}
+
+.sales-return-table th,
+.sales-return-table td {
+  text-align: left;
+}
+
+.sales-return-table th:nth-child(2),
+.sales-return-table td:nth-child(2),
+.sales-return-table th:nth-child(3),
+.sales-return-table td:nth-child(3),
+.sales-return-table th:nth-child(4),
+.sales-return-table td:nth-child(4),
+.sales-return-table th:nth-child(5),
+.sales-return-table td:nth-child(5) {
+  text-align: right;
+}
+
+.subtle-text {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.status-ok {
+  color: var(--accent-dark);
+  font-weight: 800;
+}
+
+.status-warn {
+  color: var(--amber);
+  font-weight: 800;
+}
+
 .finance-limit-note {
   color: var(--amber);
   background: var(--danger-bg);

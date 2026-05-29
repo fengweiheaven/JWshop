@@ -53,10 +53,25 @@ const financeRowCount = document.querySelector("#financeRowCount");
 const financeColumnCount = document.querySelector("#financeColumnCount");
 const financeTableHead = document.querySelector("#financeTableHead");
 const financeTableBody = document.querySelector("#financeTableBody");
+const salesFileInput = document.querySelector("#salesFileInput");
+const salesDropZone = document.querySelector("#salesDropZone");
+const salesFileName = document.querySelector("#salesFileName");
+const salesSheetName = document.querySelector("#salesSheetName");
+const salesMetaRows = document.querySelector("#salesMetaRows");
+const salesMetaColumns = document.querySelector("#salesMetaColumns");
+const salesWarningText = document.querySelector("#salesWarningText");
+const salesSourceCount = document.querySelector("#salesSourceCount");
+const salesRowCount = document.querySelector("#salesRowCount");
+const salesColumnCount = document.querySelector("#salesColumnCount");
+const salesReturnSummaryText = document.querySelector("#salesReturnSummaryText");
+const salesReturnTableBody = document.querySelector("#salesReturnTableBody");
+const salesTableHead = document.querySelector("#salesTableHead");
+const salesTableBody = document.querySelector("#salesTableBody");
 
 const STORE_KEY = "inventory-tool-store-settings-v1";
 const DATA_KEY = "inventory-tool-parsed-data-v1";
 const FINANCE_DATA_KEY = "inventory-tool-finance-data-v4";
+const SALES_DATA_KEY = "inventory-tool-sales-data-v1";
 const LEGACY_FINANCE_DATA_KEYS = [
   "inventory-tool-finance-data-v1",
   "inventory-tool-finance-data-v2",
@@ -175,6 +190,7 @@ const columnAliases = {
 
 let parsedData = null;
 let financeData = null;
+let salesData = null;
 let currentSummary = [];
 let editingStoreId = null;
 let deleteTargetStoreId = null;
@@ -1816,6 +1832,525 @@ async function uploadFinanceFiles(files) {
   }
 }
 
+function normalizeSalesCellValue(value, header = "") {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return formatDateKeyFromDate(value) || "";
+
+  const text = String(value).trim();
+  const headerText = String(header || "");
+  if (!text) return "";
+
+  if (/(日期|时间)/.test(headerText)) {
+    if (typeof value === "number" && value >= 20000 && value <= 80000) {
+      return parseExcelSerialDate(value) || text;
+    }
+
+    if (/^\d{4,5}(?:\.\d+)?$/.test(text)) {
+      const serial = Number(text);
+      if (serial >= 20000 && serial <= 80000) {
+        return parseExcelSerialDate(serial) || text;
+      }
+    }
+
+    return parseDateValue(text) || text;
+  }
+
+  return text;
+}
+
+function buildSalesHeaders(headerRow, columnCount) {
+  return Array.from({ length: columnCount }, (_, index) => {
+    const header = normalizeSalesCellValue(headerRow?.[index]).trim();
+    return header || `列${index + 1}`;
+  });
+}
+
+function parseSalesFile(filename, arrayBuffer) {
+  const readableTables = readFileTables(filename, arrayBuffer);
+  const tables = [];
+  const failedFiles = [];
+
+  readableTables.forEach((table) => {
+    try {
+      const rowsWithIndex = table.rows
+        .map((row, index) => ({ row, rowNumber: index + 1 }))
+        .filter(({ row }) => !isEmptyRow(row));
+      if (rowsWithIndex.length < 2) {
+        throw new Error("该分页没有可展示的数据行。");
+      }
+
+      const columnCount = rowsWithIndex.reduce(
+        (max, { row }) => Math.max(max, row.length),
+        0,
+      );
+      const headers = buildSalesHeaders(rowsWithIndex[0].row, columnCount);
+      const rows = rowsWithIndex
+        .slice(1)
+        .map(({ row, rowNumber }) => ({
+          sourceRow: rowNumber,
+          values: headers.map((header, index) => normalizeSalesCellValue(row[index], header)),
+        }))
+        .filter((row) => row.values.some(Boolean));
+
+      if (!rows.length) {
+        throw new Error("该分页只有表头，没有可展示的数据行。");
+      }
+
+      tables.push({
+        filename,
+        sheetName: table.sheetName,
+        sheetNames: table.sheetNames || [table.sheetName],
+        rowCount: rows.length,
+        columnCount,
+        headers,
+        rows,
+      });
+    } catch (error) {
+      failedFiles.push({
+        filename: `${filename} / ${table.sheetName || "未命名分页"}`,
+        message: error.message || "解析失败",
+      });
+    }
+  });
+
+  if (!tables.length) {
+    throw new Error(
+      failedFiles.length
+        ? failedFiles.map((file) => `${file.filename}：${file.message}`).join("；")
+        : "没有可展示的数据。",
+    );
+  }
+
+  return { tables, failedFiles };
+}
+
+function combineSalesTables(tables, failedFiles = []) {
+  const columnCount = tables.reduce(
+    (max, table) => Math.max(max, table.columnCount || table.headers?.length || 0),
+    0,
+  );
+  const headers = Array.from({ length: columnCount }, (_, index) => {
+    const matchedHeader = tables
+      .map((table) => normalizeSalesCellValue(table.headers?.[index]))
+      .find(Boolean);
+    return matchedHeader || `列${index + 1}`;
+  });
+  const sources = tables.map((table, index) => ({
+    id: table.sourceId || makeSourceId(index),
+    filename: table.filename,
+    sheetName: table.sheetName,
+    sheetNames: table.sheetNames || [],
+    rowCount: table.rowCount,
+    columnCount: table.columnCount,
+    headers: table.headers,
+  }));
+  const rows = tables.flatMap((table, tableIndex) => {
+    const source = sources[tableIndex];
+    return table.rows.map((row) => ({
+      ...row,
+      sourceId: source.id,
+      sourceFile: source.filename,
+      sourceSheet: source.sheetName,
+      values: headers.map((header, index) => normalizeSalesCellValue(row.values?.[index], header)),
+    }));
+  });
+
+  return {
+    filename:
+      sources.length > 1
+        ? `${sources.length} 个销售数据源表`
+        : sources[0]?.filename || "",
+    sheetName:
+      sources.length > 1
+        ? `已读取 ${sources.length} 个销售数据源表`
+        : sources[0]?.sheetName || "-",
+    rowCount: rows.length,
+    columnCount,
+    headers,
+    rows,
+    sources,
+    failedFiles,
+  };
+}
+
+function isValidSalesData(data) {
+  return Boolean(
+    data &&
+      Array.isArray(data.rows) &&
+      Array.isArray(data.sources) &&
+      Array.isArray(data.headers) &&
+      typeof data.rowCount === "number",
+  );
+}
+
+function normalizeSalesData(data) {
+  if (!isValidSalesData(data)) return null;
+
+  const columnCount = Math.max(
+    data.columnCount || 0,
+    data.headers.length,
+    ...data.rows.map((row) => row.values?.length || 0),
+  );
+  const headers = Array.from({ length: columnCount }, (_, index) => {
+    const header = normalizeSalesCellValue(data.headers[index]);
+    return header || `列${index + 1}`;
+  });
+  const sources = data.sources.map((source, index) => ({
+    id: source.id || makeLegacySourceId(source, index),
+    filename: source.filename || data.filename || "已上传销售数据",
+    sheetName: source.sheetName || data.sheetName || "-",
+    sheetNames: source.sheetNames || [],
+    rowCount: source.rowCount || 0,
+    columnCount: source.columnCount || columnCount,
+    headers: Array.isArray(source.headers) ? source.headers : headers,
+  }));
+  const fallbackSource = sources[0];
+  const rows = data.rows.map((row) => {
+    const matchedSource =
+      sources.find((source) => source.id === row.sourceId) ||
+      fallbackSource;
+
+    return {
+      ...row,
+      sourceId: row.sourceId || matchedSource?.id || "",
+      sourceFile: row.sourceFile || matchedSource?.filename || data.filename || "",
+      sourceSheet: row.sourceSheet || matchedSource?.sheetName || data.sheetName || "",
+      sourceRow: row.sourceRow || 0,
+      values: headers.map((header, index) => normalizeSalesCellValue(row.values?.[index], header)),
+    };
+  });
+
+  return {
+    filename: data.filename || sources[0]?.filename || "",
+    sheetName: data.sheetName || sources[0]?.sheetName || "-",
+    rowCount: rows.length,
+    columnCount,
+    headers,
+    rows,
+    sources,
+    failedFiles: data.failedFiles || [],
+  };
+}
+
+function loadPersistedSalesData() {
+  const saved = parseJsonFromStorage(SALES_DATA_KEY, null);
+  return normalizeSalesData(saved?.data);
+}
+
+function savePersistedSalesData(data) {
+  if (!isValidSalesData(data)) return "";
+
+  try {
+    localStorage.setItem(
+      SALES_DATA_KEY,
+      JSON.stringify({
+        savedAt: new Date().toISOString(),
+        data,
+      }),
+    );
+    return "";
+  } catch {
+    return "当前销售数据较大，浏览器本地存储空间不足，本次刷新后可能无法自动恢复销售源数据。";
+  }
+}
+
+function formatSalesFileText(data) {
+  const sources = Array.isArray(data?.sources) ? data.sources : [];
+  if (sources.length > 1) {
+    return `${sources.length} 个销售数据源表：${sources
+      .map((source) => `${source.filename}/${source.sheetName || "-"}`)
+      .join("、")}`;
+  }
+
+  return sources[0]?.filename || data?.filename || "已恢复上次销售数据";
+}
+
+function appendSalesWarningText(message) {
+  if (!message) return;
+
+  const existing = salesWarningText.hidden ? "" : salesWarningText.textContent;
+  salesWarningText.textContent = existing ? `${existing}${message}` : message;
+  salesWarningText.hidden = false;
+}
+
+function findSalesHeaderIndex(headers, aliases) {
+  const normalizedAliases = aliases.map(normalizeLabel).filter(Boolean);
+  const normalizedHeaders = headers.map(normalizeLabel);
+
+  let index = normalizedHeaders.findIndex((header) => normalizedAliases.includes(header));
+  if (index >= 0) return index;
+
+  index = normalizedHeaders.findIndex((header) =>
+    normalizedAliases.some((alias) => header.includes(alias) || alias.includes(header)),
+  );
+  return index >= 0 ? index : null;
+}
+
+function getSalesReturnFieldIndexes(headers) {
+  return {
+    product: findSalesHeaderIndex(headers, [
+      "商品名称",
+      "商品名",
+      "商品",
+      "产品名称",
+      "产品名",
+      "品名",
+    ]),
+    amount: findSalesHeaderIndex(headers, [
+      "售后金额（元）",
+      "售后金额",
+      "退货金额",
+      "退款金额",
+      "金额",
+    ]),
+  };
+}
+
+function getSalesReturnSummary(data) {
+  const headers = data?.headers || [];
+  const indexes = getSalesReturnFieldIndexes(headers);
+  const missingFields = [];
+  if (indexes.product === null) missingFields.push("商品名称");
+  if (indexes.amount === null) missingFields.push("售后金额");
+
+  if (missingFields.length) {
+    return {
+      items: [],
+      missingFields,
+      totalAmount: 0,
+      totalQuantity: 0,
+      calculatedCount: 0,
+      unpricedCount: 0,
+    };
+  }
+
+  const configuredProducts = getAllConfiguredProducts();
+  const itemMap = new Map();
+
+  data.rows.forEach((row) => {
+    const sourceProductName = normalizeSalesCellValue(row.values?.[indexes.product], headers[indexes.product]);
+    const returnAmount = Math.abs(parseNumber(row.values?.[indexes.amount], 0));
+    if (!sourceProductName || !returnAmount) return;
+
+    const configuredProduct = resolveConfiguredProductFromProducts(configuredProducts, sourceProductName);
+    const productName = configuredProduct ? getProductName(configuredProduct) : sourceProductName;
+    const price = configuredProduct ? getProductPrice(configuredProduct) : null;
+    const key = normalizeProductName(productName) || productName;
+    const existing = itemMap.get(key) || {
+      productName,
+      sourceNames: new Set(),
+      amount: 0,
+      price,
+      quantity: 0,
+      rows: 0,
+      matched: Boolean(configuredProduct),
+      hasPrice: Number.isFinite(price) && price > 0,
+    };
+
+    existing.sourceNames.add(sourceProductName);
+    existing.amount += returnAmount;
+    existing.rows += 1;
+    if (existing.hasPrice) {
+      existing.quantity += returnAmount / existing.price;
+    }
+    itemMap.set(key, existing);
+  });
+
+  const items = [...itemMap.values()]
+    .map((item) => {
+      let status = "已计算";
+      if (!item.matched) status = "未匹配商品";
+      else if (!item.hasPrice) status = "未设置单价";
+
+      return {
+        ...item,
+        sourceNames: [...item.sourceNames],
+        status,
+      };
+    })
+    .sort((a, b) => b.amount - a.amount);
+  const calculatedItems = items.filter((item) => item.hasPrice);
+
+  return {
+    items,
+    missingFields,
+    totalAmount: items.reduce((sum, item) => sum + item.amount, 0),
+    totalQuantity: calculatedItems.reduce((sum, item) => sum + item.quantity, 0),
+    calculatedCount: calculatedItems.length,
+    unpricedCount: items.length - calculatedItems.length,
+  };
+}
+
+function renderSalesReturnSummary(data) {
+  const summary = getSalesReturnSummary(data || { headers: [], rows: [] });
+
+  if (summary.missingFields?.length) {
+    salesReturnSummaryText.textContent = `缺少${summary.missingFields.join("、")}列`;
+    salesReturnTableBody.innerHTML = `<tr><td colspan="6" class="empty-cell">未识别到${escapeHtml(
+      summary.missingFields.join("、"),
+    )}列，无法计算退货数量</td></tr>`;
+    return;
+  }
+
+  if (!summary.items.length) {
+    salesReturnSummaryText.textContent = "暂无可计算的退货数据";
+    salesReturnTableBody.innerHTML = `<tr><td colspan="6" class="empty-cell">暂无可计算的退货数据</td></tr>`;
+    return;
+  }
+
+  salesReturnSummaryText.textContent = `共 ${formatNumber(summary.items.length)} 个商品，可计算 ${formatNumber(
+    summary.calculatedCount,
+  )} 个，退货数量合计 ${formatNumber(summary.totalQuantity)}`;
+  salesReturnTableBody.innerHTML = summary.items
+    .map((item) => {
+      const statusClass = item.hasPrice ? "status-ok" : "status-warn";
+      const sourceHint =
+        item.sourceNames.length > 1 || item.sourceNames[0] !== item.productName
+          ? `<span class="subtle-text">${escapeHtml(item.sourceNames.join(" / "))}</span>`
+          : "";
+
+      return `<tr>
+        <td><strong>${escapeHtml(item.productName)}</strong>${sourceHint}</td>
+        <td>${formatMoney(item.amount)}</td>
+        <td>${item.hasPrice ? formatMoney(item.price) : "-"}</td>
+        <td>${item.hasPrice ? formatNumber(item.quantity) : "-"}</td>
+        <td>${formatNumber(item.rows)}</td>
+        <td><span class="${statusClass}">${escapeHtml(item.status)}</span></td>
+      </tr>`;
+    })
+    .join("");
+}
+
+function renderSalesTable(data) {
+  const headers = data?.headers?.length ? data.headers : ["销售数据"];
+  const colspan = headers.length;
+
+  salesTableHead.innerHTML = `<tr>${headers
+    .map((header) => `<th>${escapeHtml(header)}</th>`)
+    .join("")}</tr>`;
+
+  if (!data?.rows?.length) {
+    salesTableBody.innerHTML = `<tr><td colspan="${colspan}" class="empty-cell">上传销售源数据后展示表内容</td></tr>`;
+    return;
+  }
+
+  salesTableBody.innerHTML = data.rows
+    .map(
+      (row) => `<tr>${headers
+        .map((header, index) => `<td>${escapeHtml(normalizeSalesCellValue(row.values?.[index], header))}</td>`)
+        .join("")}</tr>`,
+    )
+    .join("");
+}
+
+function resetSalesResult(message = "上传销售源数据后展示表内容") {
+  salesData = null;
+  localStorage.removeItem(SALES_DATA_KEY);
+  salesFileInput.value = "";
+  salesFileName.textContent = "未选择文件";
+  salesSheetName.textContent = "-";
+  salesMetaRows.textContent = "0";
+  salesMetaColumns.textContent = "0";
+  salesSourceCount.textContent = "0";
+  salesRowCount.textContent = "0";
+  salesColumnCount.textContent = "0";
+  salesWarningText.hidden = true;
+  salesWarningText.textContent = "";
+  salesReturnSummaryText.textContent = "待上传销售数据";
+  salesReturnTableBody.innerHTML = `<tr><td colspan="6" class="empty-cell">${escapeHtml(
+    "上传销售源数据后计算退货数量",
+  )}</td></tr>`;
+  salesTableHead.innerHTML = "<tr><th>销售数据</th></tr>";
+  salesTableBody.innerHTML = `<tr><td colspan="1" class="empty-cell">${escapeHtml(message)}</td></tr>`;
+}
+
+function renderSalesData(data, options = {}) {
+  const { persist = true } = options;
+  const normalized = normalizeSalesData(data);
+
+  if (!normalized) {
+    resetSalesResult();
+    return;
+  }
+
+  salesData = normalized;
+  salesFileName.textContent = formatSalesFileText(normalized);
+  salesSheetName.textContent =
+    normalized.sources.length > 1
+      ? `已读取 ${normalized.sources.length} 个销售数据源表`
+      : normalized.sources[0]?.sheetName || "-";
+  salesMetaRows.textContent = formatNumber(normalized.rowCount);
+  salesMetaColumns.textContent = formatNumber(normalized.columnCount);
+  salesSourceCount.textContent = formatNumber(normalized.sources.length);
+  salesRowCount.textContent = formatNumber(normalized.rowCount);
+  salesColumnCount.textContent = formatNumber(normalized.columnCount);
+  salesWarningText.hidden = true;
+  salesWarningText.textContent = "";
+
+  if (normalized.failedFiles?.length) {
+    appendSalesWarningText(
+      `未读取销售数据源表：${normalized.failedFiles
+        .map((file) => `${file.filename}（${file.message}）`)
+        .join("；")}。`,
+    );
+  }
+
+  if (persist) {
+    appendSalesWarningText(savePersistedSalesData(normalized));
+  }
+
+  renderSalesReturnSummary(normalized);
+  renderSalesTable(normalized);
+}
+
+async function uploadSalesFiles(files) {
+  const uploadList = [...(files || [])].filter(Boolean);
+  if (!uploadList.length) return;
+
+  const previousFileText = salesFileName.textContent;
+  salesFileName.textContent =
+    uploadList.length === 1
+      ? uploadList[0].name
+      : `${uploadList.length} 个文件：${uploadList.map((file) => file.name).join("、")}`;
+  setStatus("销售处理中");
+
+  try {
+    const parsedTables = [];
+    const failedFiles = [];
+
+    for (const file of uploadList) {
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const parsedResult = parseSalesFile(file.name, arrayBuffer);
+        parsedTables.push(...parsedResult.tables);
+        failedFiles.push(...parsedResult.failedFiles);
+      } catch (error) {
+        failedFiles.push({
+          filename: file.name,
+          message: error.message || "解析失败",
+        });
+      }
+    }
+
+    if (!parsedTables.length) {
+      throw new Error(
+        failedFiles.length
+          ? failedFiles.map((file) => `${file.filename}：${file.message}`).join("；")
+          : "没有可读取的销售源数据。",
+      );
+    }
+
+    const parsedSalesData = combineSalesTables(parsedTables, failedFiles);
+    renderSalesData(parsedSalesData);
+    salesFileInput.value = "";
+    setStatus("销售已完成", "ready");
+  } catch (error) {
+    setStatus("销售处理失败", "error");
+    salesFileName.textContent = previousFileText;
+    appendSalesWarningText(`销售源数据读取失败：${error.message}`);
+  }
+}
+
 function appendWarningText(message) {
   if (!message) return;
 
@@ -2321,6 +2856,7 @@ function clearSelectedStore() {
   saveStoreState();
   renderStoreList();
   renderSummary();
+  if (salesData) renderSalesReturnSummary(salesData);
 }
 
 function isBlankStoreCancelTarget(target) {
@@ -2536,6 +3072,7 @@ function saveStoreFromEditor() {
   saveStoreState();
   renderStoreList();
   renderSummary();
+  if (salesData) renderSalesReturnSummary(salesData);
 }
 
 function openDeleteStoreConfirm(storeId = storeState.selectedStoreId) {
@@ -2780,6 +3317,10 @@ financeSourceTableList.addEventListener("click", (event) => {
   deleteFinanceSourceTable(deleteButton.dataset.deleteFinanceSource);
 });
 
+salesFileInput.addEventListener("change", (event) => {
+  uploadSalesFiles(event.target.files);
+});
+
 fileInput.addEventListener("change", (event) => {
   uploadFiles(event.target.files);
 });
@@ -2925,6 +3466,24 @@ financeDropZone.addEventListener("drop", (event) => {
   uploadFinanceFiles(event.dataTransfer.files);
 });
 
+for (const eventName of ["dragenter", "dragover"]) {
+  salesDropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    salesDropZone.classList.add("is-dragging");
+  });
+}
+
+for (const eventName of ["dragleave", "drop"]) {
+  salesDropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    salesDropZone.classList.remove("is-dragging");
+  });
+}
+
+salesDropZone.addEventListener("drop", (event) => {
+  uploadSalesFiles(event.dataTransfer.files);
+});
+
 setRandomHeadline();
 setActiveModule("inventory");
 clearLegacyFinanceData();
@@ -2946,4 +3505,11 @@ if (restoredFinanceData) {
   renderFinanceData(restoredFinanceData, { persist: false });
 } else {
   resetFinanceResult();
+}
+
+const restoredSalesData = loadPersistedSalesData();
+if (restoredSalesData) {
+  renderSalesData(restoredSalesData, { persist: false });
+} else {
+  resetSalesResult();
 }
