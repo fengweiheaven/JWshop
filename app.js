@@ -5,6 +5,7 @@ const addSourceTableButton = document.querySelector("#addSourceTableButton");
 const sourceTableList = document.querySelector("#sourceTableList");
 const dateSelect = document.querySelector("#dateSelect");
 const statusPill = document.querySelector("#statusPill");
+const headlineText = document.querySelector("#headlineText");
 const sheetName = document.querySelector("#sheetName");
 const headerRow = document.querySelector("#headerRow");
 const columnMatch = document.querySelector("#columnMatch");
@@ -18,6 +19,8 @@ const newStoreButton = document.querySelector("#newStoreButton");
 const allProductsButton = document.querySelector("#allProductsButton");
 const exportInventoryTextButton = document.querySelector("#exportInventoryTextButton");
 const storeList = document.querySelector("#storeList");
+const storeArea = document.querySelector(".store-area");
+const workspace = document.querySelector(".workspace");
 const storeEditor = document.querySelector("#storeEditor");
 const storeEditorTitle = document.querySelector("#storeEditorTitle");
 const storeNameInput = document.querySelector("#storeNameInput");
@@ -30,10 +33,30 @@ const deleteConfirmModal = document.querySelector("#deleteConfirmModal");
 const deleteConfirmText = document.querySelector("#deleteConfirmText");
 const cancelDeleteStoreButton = document.querySelector("#cancelDeleteStoreButton");
 const confirmDeleteStoreButton = document.querySelector("#confirmDeleteStoreButton");
+const restockModal = document.querySelector("#restockModal");
+const restockList = document.querySelector("#restockList");
+const restockMuteCheckbox = document.querySelector("#restockMuteCheckbox");
+const closeRestockButton = document.querySelector("#closeRestockButton");
 
 const STORE_KEY = "inventory-tool-store-settings-v1";
 const DATA_KEY = "inventory-tool-parsed-data-v1";
 const STORE_BACKUP_KEY = "inventory-tool-store-settings-backup-v1";
+const RESTOCK_MUTE_KEY = "inventory-tool-restock-muted-until-v1";
+const LOW_STOCK_THRESHOLD = 200;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+const headlineBlessings = [
+  "愿今天的努力，都变成明天的底气",
+  "稳稳当当地做好每一天，答案会慢慢出现",
+  "愿你眼里有光，手里有数，心里有方向",
+  "把小事做好，日子就会一点点变好",
+  "今天也要顺顺利利，清清爽爽地往前走",
+  "愿每一份认真，都能开出漂亮的结果",
+  "慢慢来，比较快；稳稳做，走得远",
+  "愿你所做皆有回响，所行皆有收获",
+  "保持热爱，也保持清醒",
+  "好运藏在认真做事的每一个瞬间",
+];
 
 const fieldLabels = {
   date: "日期",
@@ -111,6 +134,13 @@ let parsedData = null;
 let currentSummary = [];
 let editingStoreId = null;
 let deleteTargetStoreId = null;
+let draggedStoreId = null;
+let draggedStoreCard = null;
+let storeDragPointerId = null;
+let storeDragStartX = 0;
+let storeDragStartY = 0;
+let hasStoreDragMoved = false;
+let suppressStoreClick = false;
 let storeState = loadStoreState();
 
 const numberFormatter = new Intl.NumberFormat("zh-CN", {
@@ -126,6 +156,13 @@ const moneyFormatter = new Intl.NumberFormat("zh-CN", {
 function setStatus(text, mode = "") {
   statusPill.textContent = text;
   statusPill.className = `status-pill ${mode}`.trim();
+}
+
+function setRandomHeadline() {
+  if (!headlineText) return;
+
+  const index = Math.floor(Math.random() * headlineBlessings.length);
+  headlineText.textContent = headlineBlessings[index];
 }
 
 function formatNumber(value) {
@@ -677,18 +714,18 @@ function readCsvRows(arrayBuffer) {
   return { sheetName: "CSV", sheetNames: ["CSV"], rows };
 }
 
-function readXlsxRows(arrayBuffer) {
+function readXlsxTables(arrayBuffer) {
   if (!window.XLSX) {
     throw new Error("缺少离线 Excel 解析库，请确认 vendor/xlsx.full.min.js 和 index.html 在同一工具文件夹内。");
   }
 
   const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: "array", cellDates: false });
   const sheetNames = workbook.SheetNames || [];
-  let selectedTitle = "";
-  let selectedRows = [];
+  const tables = [];
 
   for (const sheetName of sheetNames) {
     const worksheet = workbook.Sheets[sheetName];
+    if (!worksheet) continue;
     const rows = XLSX.utils.sheet_to_json(worksheet, {
       header: 1,
       raw: true,
@@ -697,30 +734,15 @@ function readXlsxRows(arrayBuffer) {
     });
     const meaningfulCount = rows.filter((row) => !isEmptyRow(row)).length;
     if (meaningfulCount > 1) {
-      selectedTitle = sheetName;
-      selectedRows = rows;
-      break;
+      tables.push({ sheetName, sheetNames, rows });
     }
   }
 
-  if (!selectedRows.length) throw new Error("这个 Excel 里没有可读取的数据行。");
-  return { sheetName: selectedTitle, sheetNames, rows: selectedRows };
+  if (!tables.length) throw new Error("这个 Excel 里没有可读取的数据行。");
+  return tables;
 }
 
-function parseTable(filename, arrayBuffer) {
-  const suffix = filename.slice(filename.lastIndexOf(".")).toLowerCase();
-  let table;
-
-  if ([".xlsx", ".xlsm", ".xltx", ".xltm"].includes(suffix)) {
-    table = readXlsxRows(arrayBuffer);
-  } else if (suffix === ".csv") {
-    table = readCsvRows(arrayBuffer);
-  } else if (suffix === ".xls") {
-    throw new Error("暂不支持旧版 .xls，请另存为 .xlsx 或 .csv 后再上传。");
-  } else {
-    throw new Error("请上传 .xlsx、.xlsm 或 .csv 文件。");
-  }
-
+function parseTableRows(filename, table) {
   const { headerIndex, headers, detected } = findHeaderRow(table.rows);
   const movementColumns = detectMovementColumns(headers, detected);
   const dataRows = table.rows.slice(headerIndex + 1);
@@ -854,6 +876,51 @@ function parseTable(filename, arrayBuffer) {
     dates,
     rows: normalizedRows,
   };
+}
+
+function readFileTables(filename, arrayBuffer) {
+  const suffix = filename.slice(filename.lastIndexOf(".")).toLowerCase();
+
+  if ([".xlsx", ".xlsm", ".xltx", ".xltm"].includes(suffix)) {
+    return readXlsxTables(arrayBuffer);
+  }
+
+  if (suffix === ".csv") {
+    return [readCsvRows(arrayBuffer)];
+  }
+
+  if (suffix === ".xls") {
+    throw new Error("暂不支持旧版 .xls，请另存为 .xlsx 或 .csv 后再上传。");
+  }
+
+  throw new Error("请上传 .xlsx、.xlsm 或 .csv 文件。");
+}
+
+function parseTable(filename, arrayBuffer) {
+  const readableTables = readFileTables(filename, arrayBuffer);
+  const parsedTables = [];
+  const failedFiles = [];
+
+  readableTables.forEach((table) => {
+    try {
+      parsedTables.push(parseTableRows(filename, table));
+    } catch (error) {
+      failedFiles.push({
+        filename: `${filename} / ${table.sheetName || "未命名分页"}`,
+        message: error.message || "解析失败",
+      });
+    }
+  });
+
+  if (!parsedTables.length) {
+    throw new Error(
+      failedFiles.length
+        ? failedFiles.map((file) => `${file.filename}：${file.message}`).join("；")
+        : "没有可统计的数据。",
+    );
+  }
+
+  return { tables: parsedTables, failedFiles };
 }
 
 function makeSourceId(index = 0) {
@@ -1016,8 +1083,8 @@ function rebuildParsedDataFromSources(sources, rows, options = {}) {
   }
 
   return {
-    filename: `${normalizedSources.length} 个文件`,
-    sheetName: `已读取 ${normalizedSources.length} 个文件`,
+    filename: `${normalizedSources.length} 个数据源表`,
+    sheetName: `已读取 ${normalizedSources.length} 个数据源表`,
     sheetNames: normalizedSources.flatMap((source) => source.sheetNames || [source.sheetName]),
     headerRow: null,
     detectedColumns: null,
@@ -1143,7 +1210,9 @@ function formatParsedDataFileText(data) {
   const sources = Array.isArray(data?.sources) ? data.sources : [];
 
   if (sources.length > 1) {
-    return `${sources.length} 个文件：${sources.map((source) => source.filename).join("、")}`;
+    return `${sources.length} 个数据源表：${sources
+      .map((source) => `${source.filename}/${source.sheetName || "-"}`)
+      .join("、")}`;
   }
 
   return sources[0]?.filename || data?.filename || "已恢复上次上传数据";
@@ -1334,6 +1403,75 @@ function getProductInventoryForDate(product, dateKey) {
 
 function getProductInventory(product) {
   return getProductInventoryForDate(product, dateSelect.value);
+}
+
+function getRestockMutedUntil() {
+  const timestamp = Number(localStorage.getItem(RESTOCK_MUTE_KEY) || 0);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function isRestockMuted() {
+  const mutedUntil = getRestockMutedUntil();
+  if (!mutedUntil) return false;
+
+  if (Date.now() < mutedUntil) return true;
+  localStorage.removeItem(RESTOCK_MUTE_KEY);
+  return false;
+}
+
+function saveRestockMuteIfChecked() {
+  if (!restockMuteCheckbox.checked) return;
+  localStorage.setItem(RESTOCK_MUTE_KEY, String(Date.now() + ONE_DAY_MS));
+}
+
+function getLowStockProducts(dateKey = dateSelect.value) {
+  if (!parsedData || !dateKey || dateSelect.disabled) return [];
+
+  const items = [];
+  storeState.stores.forEach((store) => {
+    store.products.forEach((product) => {
+      const inventory = getProductInventoryForDate(product, dateKey);
+      if (!inventory || inventory.totalQty >= LOW_STOCK_THRESHOLD) return;
+
+      items.push({
+        storeName: store.name,
+        productName: getProductName(product),
+        caseQty: inventory.caseQty,
+        bottleQty: inventory.bottleQty,
+        totalQty: inventory.totalQty,
+      });
+    });
+  });
+
+  return items;
+}
+
+function openRestockModal() {
+  if (isRestockMuted()) return;
+
+  const items = getLowStockProducts();
+  if (!items.length) return;
+
+  restockList.innerHTML = items
+    .map(
+      (item) => `<div class="restock-item">
+        <strong>${escapeHtml(item.storeName)} · ${escapeHtml(item.productName)}</strong>
+        <span>当前库存 ${formatNumber(item.totalQty)}（整件 ${formatNumber(
+          item.caseQty,
+        )}，单瓶 ${formatNumber(item.bottleQty)}）</span>
+      </div>`,
+    )
+    .join("");
+  restockMuteCheckbox.checked = false;
+  restockModal.hidden = false;
+  closeRestockButton.focus();
+}
+
+function closeRestockModal() {
+  saveRestockMuteIfChecked();
+  restockModal.hidden = true;
+  restockList.innerHTML = "";
+  restockMuteCheckbox.checked = false;
 }
 
 function getProductMovement(product, dateKey) {
@@ -1528,6 +1666,7 @@ function renderStoreList() {
         store.id === storeState.selectedStoreId ? "is-active" : ""
       }" data-store-id="${escapeHtml(store.id)}">
         <div class="store-card-header">
+          <span class="store-drag-handle" aria-hidden="true"></span>
           <button class="store-select-button" type="button" data-select-store="${escapeHtml(
             store.id,
           )}">
@@ -1546,6 +1685,143 @@ function renderStoreList() {
       </article>`,
     )
     .join("");
+}
+
+function getStoreOrderFromDom() {
+  return [...storeList.querySelectorAll("[data-store-id]")]
+    .map((card) => card.dataset.storeId)
+    .filter(Boolean);
+}
+
+function reorderStoresByIds(storeIds) {
+  if (storeIds.length !== storeState.stores.length) return false;
+
+  const storesById = new Map(storeState.stores.map((store) => [store.id, store]));
+  const reorderedStores = storeIds.map((storeId) => storesById.get(storeId)).filter(Boolean);
+  if (reorderedStores.length !== storeState.stores.length) return false;
+
+  const hasChanged = reorderedStores.some(
+    (store, index) => store.id !== storeState.stores[index].id,
+  );
+  if (!hasChanged) return false;
+
+  storeState.stores = reorderedStores;
+  saveStoreState();
+  return true;
+}
+
+function clearStoreDragClasses() {
+  storeList.querySelectorAll(".store-card").forEach((card) => {
+    card.classList.remove("is-dragging");
+  });
+}
+
+function clearSelectedStore() {
+  if (!storeState.selectedStoreId) return;
+
+  storeState.selectedStoreId = "";
+  saveStoreState();
+  renderStoreList();
+  renderSummary();
+}
+
+function isBlankStoreCancelTarget(target) {
+  if (!(target instanceof Element)) return false;
+
+  if (target.closest("[data-store-id], .modal-backdrop")) return false;
+  if (target.closest("button, input, select, textarea, a, label")) return false;
+
+  return [storeList, storeArea, workspace, document.body, document.documentElement].includes(target);
+}
+
+function getStoreDragCard(event) {
+  const storeCard = event.target.closest("[data-store-id]");
+  if (!storeCard || !storeList.contains(storeCard)) return null;
+
+  if (event.target.closest("[data-edit-store]")) return null;
+  if (event.target.closest(".store-drag-handle")) return storeCard;
+  if (event.target.closest("button, input, select, textarea, a")) return null;
+
+  return storeCard;
+}
+
+function placeDraggedStoreCard(clientX, clientY) {
+  if (!draggedStoreCard) return;
+
+  const element = document.elementFromPoint(clientX, clientY);
+  const targetCard = element?.closest(".store-card:not(.is-dragging)");
+  if (!targetCard || !storeList.contains(targetCard)) return;
+
+  const targetRect = targetCard.getBoundingClientRect();
+  const shouldPlaceAfter = clientY > targetRect.top + targetRect.height / 2;
+  storeList.insertBefore(
+    draggedStoreCard,
+    shouldPlaceAfter ? targetCard.nextSibling : targetCard,
+  );
+}
+
+function startStorePointerDrag(event) {
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+
+  const storeCard = getStoreDragCard(event);
+  if (!storeCard) return;
+
+  draggedStoreId = storeCard.dataset.storeId;
+  draggedStoreCard = storeCard;
+  storeDragPointerId = event.pointerId;
+  storeDragStartX = event.clientX;
+  storeDragStartY = event.clientY;
+  hasStoreDragMoved = false;
+  storeCard.setPointerCapture?.(event.pointerId);
+}
+
+function moveStorePointerDrag(event) {
+  if (!draggedStoreId || event.pointerId !== storeDragPointerId) return;
+
+  const distance = Math.hypot(
+    event.clientX - storeDragStartX,
+    event.clientY - storeDragStartY,
+  );
+  if (!hasStoreDragMoved && distance < 6) return;
+
+  if (!hasStoreDragMoved) {
+    hasStoreDragMoved = true;
+    suppressStoreClick = true;
+    draggedStoreCard?.classList.add("is-dragging");
+  }
+
+  event.preventDefault();
+  placeDraggedStoreCard(event.clientX, event.clientY);
+}
+
+function finishStorePointerDrag(event) {
+  if (!draggedStoreId || event.pointerId !== storeDragPointerId) return;
+
+  try {
+    draggedStoreCard?.releasePointerCapture?.(event.pointerId);
+  } catch {
+    // The pointer can already be released if the browser cancels a drag.
+  }
+  const reordered = hasStoreDragMoved && reorderStoresByIds(getStoreOrderFromDom());
+
+  draggedStoreId = null;
+  draggedStoreCard = null;
+  storeDragPointerId = null;
+  storeDragStartX = 0;
+  storeDragStartY = 0;
+  hasStoreDragMoved = false;
+  clearStoreDragClasses();
+
+  if (suppressStoreClick) {
+    setTimeout(() => {
+      suppressStoreClick = false;
+    }, 0);
+  }
+
+  if (reordered) {
+    renderStoreList();
+    renderSummary();
+  }
 }
 
 function renderProductEditorRow(product = { name: "", price: null }) {
@@ -1737,6 +2013,7 @@ function renderParsedData(data, options = {}) {
   const {
     persist = true,
     restore = false,
+    showRestockAlert = true,
     selectedDate = "",
   } = options;
 
@@ -1759,17 +2036,19 @@ function renderParsedData(data, options = {}) {
       : data.dates.at(-1);
   fileName.textContent = formatParsedDataFileText(data);
 
-  const isMultiFile = data.sources?.length > 1;
-  sheetName.textContent = isMultiFile
-    ? `已读取 ${data.sources.length} 个文件`
+  const isMultiSource = data.sources?.length > 1;
+  sheetName.textContent = isMultiSource
+    ? `已读取 ${data.sources.length} 个数据源表`
     : data.sheetName || "-";
-  headerRow.textContent = isMultiFile
-    ? data.sources.map((source) => `${source.filename}：第 ${source.headerRow} 行`).join("；")
+  headerRow.textContent = isMultiSource
+    ? data.sources
+        .map((source) => `${source.filename}/${source.sheetName || "-"}：第 ${source.headerRow} 行`)
+        .join("；")
     : data.headerRow
       ? `第 ${data.headerRow} 行`
       : "-";
-  const baseColumnText = isMultiFile
-    ? `文件明细：${data.sources
+  const baseColumnText = isMultiSource
+    ? `数据源明细：${data.sources
         .map((source) => `${source.filename}（${source.sheetName}，${formatNumber(source.rowCount)} 行）`)
         .join("；")}`
     : Object.entries(data.detectedColumns)
@@ -1799,7 +2078,7 @@ function renderParsedData(data, options = {}) {
       : "";
     const skipped = data.skippedRows ? `已跳过 ${data.skippedRows} 行空日期或空商品。` : "";
     const failed = data.failedFiles?.length
-      ? `未读取文件：${data.failedFiles
+      ? `未读取数据源表：${data.failedFiles
           .map((file) => `${file.filename}（${file.message}）`)
           .join("；")}。`
       : "";
@@ -1811,12 +2090,15 @@ function renderParsedData(data, options = {}) {
   }
 
   setStatus(
-    restore ? "已恢复上次数据" : isMultiFile ? `已完成 ${data.sources.length} 个文件` : "已完成",
+    restore ? "已恢复上次数据" : isMultiSource ? `已完成 ${data.sources.length} 个数据源表` : "已完成",
     "ready",
   );
   renderSourceTableList(data);
   renderStoreList();
   renderSummary();
+  if (showRestockAlert) {
+    setTimeout(openRestockModal, 0);
+  }
 }
 
 async function uploadFiles(files) {
@@ -1841,7 +2123,9 @@ async function uploadFiles(files) {
     for (const file of uploadList) {
       try {
         const arrayBuffer = await file.arrayBuffer();
-        parsedTables.push(parseTable(file.name, arrayBuffer));
+        const parsedResult = parseTable(file.name, arrayBuffer);
+        parsedTables.push(...parsedResult.tables);
+        failedFiles.push(...parsedResult.failedFiles);
       } catch (error) {
         failedFiles.push({
           filename: file.name,
@@ -1900,14 +2184,15 @@ dateSelect.addEventListener("change", () => {
 
 newStoreButton.addEventListener("click", () => openStoreEditor());
 exportInventoryTextButton.addEventListener("click", exportInventoryText);
-allProductsButton.addEventListener("click", () => {
-  storeState.selectedStoreId = "";
-  saveStoreState();
-  renderStoreList();
-  renderSummary();
-});
+allProductsButton.addEventListener("click", clearSelectedStore);
 
 storeList.addEventListener("click", (event) => {
+  if (suppressStoreClick) {
+    event.preventDefault();
+    suppressStoreClick = false;
+    return;
+  }
+
   const editButton = event.target.closest("[data-edit-store]");
   if (editButton) {
     openStoreEditor(editButton.dataset.editStore);
@@ -1923,6 +2208,15 @@ storeList.addEventListener("click", (event) => {
   saveStoreState();
   renderStoreList();
   renderSummary();
+});
+
+storeList.addEventListener("pointerdown", startStorePointerDrag);
+document.addEventListener("pointermove", moveStorePointerDrag);
+document.addEventListener("pointerup", finishStorePointerDrag);
+document.addEventListener("pointercancel", finishStorePointerDrag);
+document.addEventListener("click", (event) => {
+  if (suppressStoreClick || !storeState.selectedStoreId) return;
+  if (isBlankStoreCancelTarget(event.target)) clearSelectedStore();
 });
 
 saveStoreButton.addEventListener("click", saveStoreFromEditor);
@@ -1958,7 +2252,15 @@ confirmDeleteStoreButton.addEventListener("click", deleteTargetStore);
 deleteConfirmModal.addEventListener("click", (event) => {
   if (event.target === deleteConfirmModal) closeDeleteStoreConfirm();
 });
+closeRestockButton.addEventListener("click", closeRestockModal);
+restockModal.addEventListener("click", (event) => {
+  if (event.target === restockModal) closeRestockModal();
+});
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !restockModal.hidden) {
+    closeRestockModal();
+    return;
+  }
   if (event.key === "Escape" && !deleteConfirmModal.hidden) {
     closeDeleteStoreConfirm();
     return;
@@ -1985,6 +2287,8 @@ for (const eventName of ["dragleave", "drop"]) {
 dropZone.addEventListener("drop", (event) => {
   uploadFiles(event.dataTransfer.files);
 });
+
+setRandomHeadline();
 
 const restoredParsedData = loadPersistedParsedData();
 if (restoredParsedData) {

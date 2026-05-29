@@ -10,8 +10,8 @@
     <div class="app-shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">本地数据处理</p>
-          <h1>库存汇总工具</h1>
+          <p class="eyebrow">店铺管理V1.0</p>
+          <h1 id="headlineText">愿今天的努力，都变成明天的底气</h1>
         </div>
         <div id="statusPill" class="status-pill">等待上传</div>
       </header>
@@ -180,6 +180,23 @@
           </button>
           <button id="confirmDeleteStoreButton" class="danger-button" type="button">
             确认删除
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div id="restockModal" class="modal-backdrop" hidden>
+      <section class="confirm-modal restock-modal" role="dialog" aria-modal="true" aria-labelledby="restockTitle">
+        <h2 id="restockTitle">补货提醒</h2>
+        <p>以下商品库存低于 200，需要补货。</p>
+        <div id="restockList" class="restock-list"></div>
+        <label class="restock-snooze-option">
+          <input id="restockMuteCheckbox" type="checkbox" />
+          <span>24 小时内不再提醒</span>
+        </label>
+        <div class="modal-actions single-action">
+          <button id="closeRestockButton" class="secondary-button" type="button">
+            知道了
           </button>
         </div>
       </section>
