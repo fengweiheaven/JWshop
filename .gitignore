@@ -1,0 +1,13 @@
+node_modules/
+build/
+dist/
+dist-web/
+__pycache__/
+
+*.log
+*.err
+*.out
+*.pyc
+
+.DS_Store
+Thumbs.db

@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>库存汇总工具</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">本地数据处理</p>
+          <h1>库存汇总工具</h1>
+        </div>
+        <div id="statusPill" class="status-pill">等待上传</div>
+      </header>
+
+      <main class="workspace">
+        <section class="store-area store-home-panel">
+          <div class="store-section-header">
+            <label>店铺</label>
+            <div class="store-header-actions">
+              <button id="exportInventoryTextButton" class="outline-button" type="button" disabled>
+                导出库存 TXT
+              </button>
+              <button
+                id="newStoreButton"
+                class="icon-button"
+                type="button"
+                title="新增店铺"
+                aria-label="新增店铺"
+              >
+                +
+              </button>
+            </div>
+          </div>
+
+          <button id="allProductsButton" class="store-all-button" type="button">
+            全部商品
+          </button>
+
+          <div id="storeList" class="store-list">
+            <p class="empty-note">暂无店铺</p>
+          </div>
+        </section>
+
+        <section class="control-panel">
+          <div class="field-group">
+            <label for="fileInput">数据源文件</label>
+            <div id="dropZone" class="drop-zone">
+              <input id="fileInput" type="file" accept=".xlsx,.xlsm,.csv" multiple />
+              <strong>选择一个或多个 Excel / CSV</strong>
+              <span id="fileName">未选择文件</span>
+            </div>
+            <div class="source-table-panel">
+              <div class="source-table-header">
+                <span>数据源表</span>
+                <button id="addSourceTableButton" class="mini-edit-button" type="button">
+                  新增表
+                </button>
+              </div>
+              <div id="sourceTableList" class="source-table-list">
+                <p class="empty-note">暂无数据源表</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label for="dateSelect">处理日期</label>
+            <select id="dateSelect" disabled>
+              <option>先上传文件</option>
+            </select>
+          </div>
+
+          <dl class="meta-list">
+            <div>
+              <dt>工作表</dt>
+              <dd id="sheetName">-</dd>
+            </div>
+            <div>
+              <dt>识别表头</dt>
+              <dd id="headerRow">-</dd>
+            </div>
+            <div>
+              <dt>列匹配</dt>
+              <dd id="columnMatch">-</dd>
+            </div>
+          </dl>
+
+          <p id="warningText" class="warning-text" hidden></p>
+        </section>
+
+        <section class="result-panel">
+          <div class="summary-bar">
+            <div>
+              <span class="summary-label">商品数</span>
+              <strong id="productCount">0</strong>
+            </div>
+            <div>
+              <span class="summary-label">数据行</span>
+              <strong id="rowCount">0</strong>
+            </div>
+            <div>
+              <span class="summary-label">总数量</span>
+              <strong id="totalCount">0</strong>
+            </div>
+            <div>
+              <span class="summary-label">库存价值</span>
+              <strong id="inventoryValue">-</strong>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>商品名称</th>
+                  <th>整件数量</th>
+                  <th>单瓶数量</th>
+                  <th>箱规</th>
+                  <th>总数量</th>
+                  <th>单价</th>
+                  <th>库存价值</th>
+                  <th>明细行</th>
+                </tr>
+              </thead>
+              <tbody id="resultBody">
+                <tr>
+                  <td colspan="8" class="empty-cell">上传表格后显示统计结果</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="storeEditor" class="modal-backdrop" hidden>
+      <section class="confirm-modal store-modal" role="dialog" aria-modal="true" aria-labelledby="storeEditorTitle">
+        <h2 id="storeEditorTitle">新增店铺</h2>
+
+        <div class="field-group compact-field">
+          <label for="storeNameInput">店铺名称</label>
+          <input id="storeNameInput" type="text" placeholder="例如：卢哥" />
+        </div>
+
+        <div class="field-group compact-field">
+          <div class="product-editor-header">
+            <label>售卖商品</label>
+            <button id="addStoreProductButton" class="mini-edit-button" type="button">
+              添加商品
+            </button>
+          </div>
+          <div id="storeProductRows" class="product-editor-list"></div>
+        </div>
+
+        <button id="deleteStoreFromEditorButton" class="text-button modal-delete-button" type="button" hidden>
+          删除店铺
+        </button>
+
+        <div class="modal-actions">
+          <button id="cancelStoreButton" class="outline-button" type="button">
+            取消
+          </button>
+          <button id="saveStoreButton" class="secondary-button" type="button">
+            保存
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div id="deleteConfirmModal" class="modal-backdrop" hidden>
+      <section class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="deleteTitle">
+        <h2 id="deleteTitle">删除店铺</h2>
+        <p id="deleteConfirmText">确认删除当前店铺吗？</p>
+        <div class="modal-actions">
+          <button id="cancelDeleteStoreButton" class="outline-button" type="button">
+            取消
+          </button>
+          <button id="confirmDeleteStoreButton" class="danger-button" type="button">
+            确认删除
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <script src="./vendor/xlsx.full.min.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
