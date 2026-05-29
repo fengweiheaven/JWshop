@@ -6,6 +6,8 @@ const sourceTableList = document.querySelector("#sourceTableList");
 const dateSelect = document.querySelector("#dateSelect");
 const statusPill = document.querySelector("#statusPill");
 const headlineText = document.querySelector("#headlineText");
+const moduleTabs = document.querySelectorAll("[data-module-tab]");
+const modulePanels = document.querySelectorAll("[data-module-panel]");
 const sheetName = document.querySelector("#sheetName");
 const headerRow = document.querySelector("#headerRow");
 const columnMatch = document.querySelector("#columnMatch");
@@ -37,12 +39,33 @@ const restockModal = document.querySelector("#restockModal");
 const restockList = document.querySelector("#restockList");
 const restockMuteCheckbox = document.querySelector("#restockMuteCheckbox");
 const closeRestockButton = document.querySelector("#closeRestockButton");
+const financeFileInput = document.querySelector("#financeFileInput");
+const financeDropZone = document.querySelector("#financeDropZone");
+const financeFileName = document.querySelector("#financeFileName");
+const financeAddSourceTableButton = document.querySelector("#financeAddSourceTableButton");
+const financeSourceTableList = document.querySelector("#financeSourceTableList");
+const financeSheetName = document.querySelector("#financeSheetName");
+const financeMetaRows = document.querySelector("#financeMetaRows");
+const financeMetaColumns = document.querySelector("#financeMetaColumns");
+const financeWarningText = document.querySelector("#financeWarningText");
+const financeSourceCount = document.querySelector("#financeSourceCount");
+const financeRowCount = document.querySelector("#financeRowCount");
+const financeColumnCount = document.querySelector("#financeColumnCount");
+const financeTableHead = document.querySelector("#financeTableHead");
+const financeTableBody = document.querySelector("#financeTableBody");
 
 const STORE_KEY = "inventory-tool-store-settings-v1";
 const DATA_KEY = "inventory-tool-parsed-data-v1";
+const FINANCE_DATA_KEY = "inventory-tool-finance-data-v4";
+const LEGACY_FINANCE_DATA_KEYS = [
+  "inventory-tool-finance-data-v1",
+  "inventory-tool-finance-data-v2",
+  "inventory-tool-finance-data-v3",
+];
 const STORE_BACKUP_KEY = "inventory-tool-store-settings-backup-v1";
 const RESTOCK_MUTE_KEY = "inventory-tool-restock-muted-until-v1";
 const LOW_STOCK_THRESHOLD = 200;
+const FINANCE_RENDER_ROW_LIMIT = 500;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 const headlineBlessings = [
@@ -57,6 +80,26 @@ const headlineBlessings = [
   "保持热爱，也保持清醒",
   "好运藏在认真做事的每一个瞬间",
 ];
+
+const FINANCE_BILL_FIELDS = [
+  "户头",
+  "销售时间",
+  "账单日期",
+  "账单名称",
+  "商品ID",
+  "商品名称",
+  "销售规格",
+  "仓库ID",
+  "仓库名称",
+  "销售数量",
+  "商家报价（元）",
+  "多多售价",
+  "结算金额",
+  "买价",
+  "毛利额",
+  "备注",
+];
+const FINANCE_DATE_FIELDS = new Set(["销售时间", "账单日期"]);
 
 const fieldLabels = {
   date: "日期",
@@ -131,6 +174,7 @@ const columnAliases = {
 };
 
 let parsedData = null;
+let financeData = null;
 let currentSummary = [];
 let editingStoreId = null;
 let deleteTargetStoreId = null;
@@ -163,6 +207,18 @@ function setRandomHeadline() {
 
   const index = Math.floor(Math.random() * headlineBlessings.length);
   headlineText.textContent = headlineBlessings[index];
+}
+
+function setActiveModule(moduleName) {
+  moduleTabs.forEach((tab) => {
+    const isActive = tab.dataset.moduleTab === moduleName;
+    tab.classList.toggle("is-active", isActive);
+    tab.setAttribute("aria-selected", String(isActive));
+  });
+
+  modulePanels.forEach((panel) => {
+    panel.hidden = panel.dataset.modulePanel !== moduleName;
+  });
 }
 
 function formatNumber(value) {
@@ -1218,6 +1274,548 @@ function formatParsedDataFileText(data) {
   return sources[0]?.filename || data?.filename || "已恢复上次上传数据";
 }
 
+function normalizeFinanceCellValue(value) {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return formatDateKeyFromDate(value) || "";
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+function normalizeFinanceDateValue(value) {
+  const text = normalizeFinanceCellValue(value).trim();
+  if (value instanceof Date) return formatDateKeyFromDate(value) || text;
+
+  if (typeof value === "number" && value >= 20000 && value <= 80000) {
+    return parseExcelSerialDate(value) || text;
+  }
+
+  if (/^\d{4,5}(?:\.\d+)?$/.test(text)) {
+    const serial = Number(text);
+    if (serial >= 20000 && serial <= 80000) {
+      return parseExcelSerialDate(serial) || text;
+    }
+  }
+
+  return parseDateValue(text) || text;
+}
+
+function normalizeFinanceFieldValue(field, value) {
+  if (FINANCE_DATE_FIELDS.has(field)) return normalizeFinanceDateValue(value);
+  return normalizeFinanceCellValue(value).trim();
+}
+
+function buildFinanceHeaders(headerRow, columnCount) {
+  return Array.from({ length: columnCount }, (_, index) => {
+    const header = normalizeFinanceCellValue(headerRow?.[index]).trim();
+    return header || `列 ${index + 1}`;
+  });
+}
+
+function mergeFinanceHeaders(sources, columnCount) {
+  const prioritizedSources = [...sources].sort((a, b) => {
+    const aIsBill = String(a.sheetName || "").trim() === "账单";
+    const bIsBill = String(b.sheetName || "").trim() === "账单";
+    return Number(bIsBill) - Number(aIsBill);
+  });
+
+  return Array.from({ length: columnCount }, (_, index) => {
+    for (const source of prioritizedSources) {
+      const header = normalizeFinanceCellValue(source.headers?.[index]).trim();
+      if (header) return header;
+    }
+    return `列 ${index + 1}`;
+  });
+}
+
+function buildFinanceFieldIndexes(headers) {
+  const indexes = {};
+  const headerIndexes = new Map();
+
+  headers.forEach((header, index) => {
+    const key = normalizeLabel(header);
+    if (key && !headerIndexes.has(key)) headerIndexes.set(key, index);
+  });
+
+  FINANCE_BILL_FIELDS.forEach((field) => {
+    indexes[field] = headerIndexes.has(normalizeLabel(field))
+      ? headerIndexes.get(normalizeLabel(field))
+      : null;
+  });
+
+  return indexes;
+}
+
+function hasFinanceBillFields(fieldIndexes) {
+  return (
+    fieldIndexes["账单名称"] !== null &&
+    (fieldIndexes["账单日期"] !== null || fieldIndexes["销售时间"] !== null) &&
+    (fieldIndexes["结算金额"] !== null || fieldIndexes["销售数量"] !== null)
+  );
+}
+
+function buildFinanceRecord(row, fieldIndexes) {
+  return Object.fromEntries(
+    FINANCE_BILL_FIELDS.map((field) => {
+      const index = fieldIndexes[field];
+      return [field, index === null ? "" : normalizeFinanceFieldValue(field, row[index])];
+    }),
+  );
+}
+
+function hasFinanceRecordValue(record) {
+  return FINANCE_BILL_FIELDS.some((field) => record[field]);
+}
+
+function financeRecordToValues(record) {
+  return FINANCE_BILL_FIELDS.map((field) => normalizeFinanceFieldValue(field, record?.[field]));
+}
+
+function parseFinanceFile(filename, arrayBuffer) {
+  const readableTables = readFileTables(filename, arrayBuffer);
+  const tables = [];
+  const failedFiles = [];
+
+  readableTables.forEach((table) => {
+    try {
+      const rowsWithIndex = table.rows
+        .map((row, index) => ({ row, rowNumber: index + 1 }))
+        .filter(({ row }) => !isEmptyRow(row));
+      if (!rowsWithIndex.length) {
+        throw new Error("该分页没有可展示的数据行。");
+      }
+
+      const sourceColumnCount = rowsWithIndex.reduce(
+        (max, { row }) => Math.max(max, row.length),
+        0,
+      );
+      const sourceHeaders = buildFinanceHeaders(rowsWithIndex[0].row, sourceColumnCount);
+      const fieldIndexes = buildFinanceFieldIndexes(sourceHeaders);
+      if (!hasFinanceBillFields(fieldIndexes)) {
+        throw new Error("未识别到财务账单字段。");
+      }
+
+      const dataRows = rowsWithIndex.slice(1);
+      if (!dataRows.length) {
+        throw new Error("该分页只有表头，没有可展示的账单数据行。");
+      }
+
+      const rows = dataRows
+        .map(({ row, rowNumber }) => {
+          const record = buildFinanceRecord(row, fieldIndexes);
+          return {
+            sourceRow: rowNumber,
+            record,
+            values: financeRecordToValues(record),
+          };
+        })
+        .filter((row) => hasFinanceRecordValue(row.record));
+
+      if (!rows.length) {
+        throw new Error("该分页没有可展示的账单数据行。");
+      }
+
+      tables.push({
+        filename,
+        sheetName: table.sheetName,
+        sheetNames: table.sheetNames || [table.sheetName],
+        rowCount: rows.length,
+        columnCount: FINANCE_BILL_FIELDS.length,
+        headers: FINANCE_BILL_FIELDS,
+        rows,
+      });
+    } catch (error) {
+      failedFiles.push({
+        filename: `${filename} / ${table.sheetName || "未命名分页"}`,
+        message: error.message || "解析失败",
+      });
+    }
+  });
+
+  if (!tables.length) {
+    throw new Error(
+      failedFiles.length
+        ? failedFiles.map((file) => `${file.filename}：${file.message}`).join("；")
+        : "没有可展示的数据。",
+    );
+  }
+
+  return { tables, failedFiles };
+}
+
+function rebuildFinanceDataFromSources(sources, rows, options = {}) {
+  const normalizedSources = sources.map((source, index) => {
+    const id = source.id || makeLegacySourceId(source, index);
+    const sourceRows = rows.filter((row) => row.sourceId === id);
+    return {
+      ...source,
+      id,
+      rowCount: sourceRows.length || source.rowCount || 0,
+      columnCount: FINANCE_BILL_FIELDS.length,
+      headers: FINANCE_BILL_FIELDS,
+    };
+  });
+  const normalizedRows = rows.map((row) => {
+    const record = row.record
+      ? Object.fromEntries(
+          FINANCE_BILL_FIELDS.map((field) => [
+            field,
+            normalizeFinanceFieldValue(field, row.record[field]),
+          ]),
+        )
+      : Object.fromEntries(
+          FINANCE_BILL_FIELDS.map((field, index) => [
+            field,
+            normalizeFinanceFieldValue(field, row.values?.[index]),
+          ]),
+        );
+
+    return {
+      ...row,
+      record,
+      values: financeRecordToValues(record),
+    };
+  });
+
+  return {
+    filename:
+      normalizedSources.length > 1
+        ? `${normalizedSources.length} 个财务数据源表`
+        : normalizedSources[0]?.filename || "",
+    sheetName:
+      normalizedSources.length > 1
+        ? `已读取 ${normalizedSources.length} 个财务数据源表`
+        : normalizedSources[0]?.sheetName || "-",
+    rowCount: normalizedRows.length,
+    columnCount: FINANCE_BILL_FIELDS.length,
+    headers: FINANCE_BILL_FIELDS,
+    rows: normalizedRows,
+    sources: normalizedSources,
+    failedFiles: options.failedFiles || [],
+  };
+}
+
+function combineFinanceTables(tables, failedFiles = []) {
+  const sources = tables.map((table, index) => ({
+    id: table.sourceId || makeSourceId(index),
+    filename: table.filename,
+    sheetName: table.sheetName,
+    sheetNames: table.sheetNames || [],
+    rowCount: table.rowCount || 0,
+    columnCount: FINANCE_BILL_FIELDS.length,
+    headers: FINANCE_BILL_FIELDS,
+  }));
+  const rows = tables.flatMap((table, index) => {
+    const source = sources[index];
+    return table.rows.map((row) => ({
+      ...row,
+      sourceId: row.sourceId || source.id,
+      sourceFile: table.filename,
+      sourceSheet: table.sheetName,
+    }));
+  });
+
+  return rebuildFinanceDataFromSources(sources, rows, { failedFiles });
+}
+
+function isValidFinanceData(data) {
+  return Boolean(
+    data &&
+      Array.isArray(data.rows) &&
+      Array.isArray(data.sources) &&
+      typeof data.rowCount === "number",
+  );
+}
+
+function normalizeFinanceDataSources(data) {
+  if (!isValidFinanceData(data)) return null;
+
+  const sources = data.sources.map((source, index) => ({
+    id: source.id || makeLegacySourceId(source, index),
+    filename: source.filename || data.filename || "已上传财务数据",
+    sheetName: source.sheetName || data.sheetName || "-",
+    sheetNames: source.sheetNames || [],
+    rowCount: source.rowCount || 0,
+    columnCount: FINANCE_BILL_FIELDS.length,
+    headers: FINANCE_BILL_FIELDS,
+  }));
+  const fallbackSource = sources[0];
+  const sourceByFileSheet = new Map(
+    sources.map((source) => [`${source.filename}::${source.sheetName}`, source]),
+  );
+  const rows = data.rows.map((row) => {
+    const matchedSource =
+      sources.find((source) => source.id === row.sourceId) ||
+      sourceByFileSheet.get(`${row.sourceFile || data.filename}::${row.sourceSheet || data.sheetName}`) ||
+      fallbackSource;
+
+    return {
+      ...row,
+      record: row.record
+        ? Object.fromEntries(
+            FINANCE_BILL_FIELDS.map((field) => [
+              field,
+              normalizeFinanceFieldValue(field, row.record[field]),
+            ]),
+          )
+        : null,
+      values: Array.isArray(row.values) ? row.values.map(normalizeFinanceCellValue) : [],
+      sourceId: row.sourceId || matchedSource?.id || "",
+      sourceFile: row.sourceFile || matchedSource?.filename || data.filename || "",
+      sourceSheet: row.sourceSheet || matchedSource?.sheetName || data.sheetName || "",
+      sourceRow: row.sourceRow || 0,
+    };
+  });
+
+  return rebuildFinanceDataFromSources(sources, rows, {
+    failedFiles: data.failedFiles || [],
+  });
+}
+
+function mergeFinanceData(existingData, appendedData) {
+  const existing = normalizeFinanceDataSources(existingData);
+  const appended = normalizeFinanceDataSources(appendedData);
+
+  if (!existing) return appended;
+  if (!appended) return existing;
+
+  return rebuildFinanceDataFromSources(
+    [...existing.sources, ...appended.sources],
+    [...existing.rows, ...appended.rows],
+    { failedFiles: appended.failedFiles || [] },
+  );
+}
+
+function loadPersistedFinanceData() {
+  const saved = parseJsonFromStorage(FINANCE_DATA_KEY, null);
+  const normalized = normalizeFinanceDataSources(saved?.data);
+  return normalized;
+}
+
+function clearLegacyFinanceData() {
+  LEGACY_FINANCE_DATA_KEYS.forEach((key) => {
+    localStorage.removeItem(key);
+  });
+}
+
+function savePersistedFinanceData(data) {
+  if (!isValidFinanceData(data)) return "";
+
+  try {
+    localStorage.setItem(
+      FINANCE_DATA_KEY,
+      JSON.stringify({
+        savedAt: new Date().toISOString(),
+        data,
+      }),
+    );
+    return "";
+  } catch {
+    return "当前财务数据较大，浏览器本地存储空间不足，本次刷新后可能无法自动恢复财务源数据。";
+  }
+}
+
+function formatFinanceFileText(data) {
+  const sources = Array.isArray(data?.sources) ? data.sources : [];
+  if (sources.length > 1) {
+    return `${sources.length} 个财务数据源表：${sources
+      .map((source) => `${source.filename}/${source.sheetName || "-"}`)
+      .join("、")}`;
+  }
+
+  return sources[0]?.filename || data?.filename || "已恢复上次财务数据";
+}
+
+function appendFinanceWarningText(message) {
+  if (!message) return;
+
+  const existing = financeWarningText.hidden ? "" : financeWarningText.textContent;
+  financeWarningText.textContent = existing ? `${existing}${message}` : message;
+  financeWarningText.hidden = false;
+}
+
+function renderFinanceSourceTableList(data = financeData) {
+  const normalized = normalizeFinanceDataSources(data);
+  if (!normalized?.sources?.length) {
+    financeSourceTableList.innerHTML = `<p class="empty-note">暂无财务数据源表</p>`;
+    return;
+  }
+
+  financeSourceTableList.innerHTML = normalized.sources
+    .map(
+      (source) => `<div class="source-table-item" data-finance-source-id="${escapeHtml(source.id)}">
+        <div>
+          <strong>${escapeHtml(source.filename)}</strong>
+          <span>${escapeHtml(source.sheetName || "-")} · ${formatNumber(source.rowCount || 0)} 行</span>
+        </div>
+        <button class="row-remove-button source-delete-button" type="button" data-delete-finance-source="${escapeHtml(
+          source.id,
+        )}" title="删除该表" aria-label="删除该表">-</button>
+      </div>`,
+    )
+    .join("");
+}
+
+function renderFinanceTable(data) {
+  const columnCount = FINANCE_BILL_FIELDS.length;
+  const colspan = columnCount;
+
+  financeTableHead.innerHTML = `<tr>
+    ${FINANCE_BILL_FIELDS.map((field) => `<th>${escapeHtml(field)}</th>`).join("")}
+  </tr>`;
+
+  if (!data?.rows?.length) {
+    financeTableBody.innerHTML = `<tr><td colspan="${colspan}" class="empty-cell">上传财务源数据后展示表内容</td></tr>`;
+    return;
+  }
+
+  const visibleRows = data.rows.slice(0, FINANCE_RENDER_ROW_LIMIT);
+  const limitNote =
+    data.rows.length > visibleRows.length
+      ? `<tr><td colspan="${colspan}" class="finance-limit-note">数据量较大，页面仅展示前 ${formatNumber(
+          visibleRows.length,
+        )} 行，共 ${formatNumber(data.rows.length)} 行；完整数据仍保存在财务数据源表中。</td></tr>`
+      : "";
+
+  financeTableBody.innerHTML =
+    visibleRows
+    .map(
+      (row) => `<tr>
+        ${FINANCE_BILL_FIELDS.map((field, index) => {
+          const value = row.record?.[field] ?? row.values?.[index] ?? "";
+          return `<td>${escapeHtml(value)}</td>`;
+        }).join("")}
+      </tr>`,
+    )
+      .join("") + limitNote;
+}
+
+function resetFinanceResult(message = "上传财务源数据后展示表内容") {
+  financeData = null;
+  localStorage.removeItem(FINANCE_DATA_KEY);
+  financeFileInput.value = "";
+  financeFileName.textContent = "未选择文件";
+  financeSheetName.textContent = "-";
+  financeMetaRows.textContent = "0";
+  financeMetaColumns.textContent = "0";
+  financeSourceCount.textContent = "0";
+  financeRowCount.textContent = "0";
+  financeColumnCount.textContent = "0";
+  financeWarningText.hidden = true;
+  financeWarningText.textContent = "";
+  renderFinanceSourceTableList(null);
+  financeTableHead.innerHTML = `<tr>${FINANCE_BILL_FIELDS.map((field) => `<th>${escapeHtml(field)}</th>`).join("")}</tr>`;
+  financeTableBody.innerHTML = `<tr><td colspan="${FINANCE_BILL_FIELDS.length}" class="empty-cell">${escapeHtml(message)}</td></tr>`;
+}
+
+function renderFinanceData(data, options = {}) {
+  const { persist = true } = options;
+  const normalized = normalizeFinanceDataSources(data);
+
+  if (!normalized) {
+    resetFinanceResult();
+    return;
+  }
+
+  financeData = normalized;
+  financeFileName.textContent = formatFinanceFileText(normalized);
+  financeSheetName.textContent =
+    normalized.sources.length > 1
+      ? `已读取 ${normalized.sources.length} 个财务数据源表`
+      : normalized.sources[0]?.sheetName || "-";
+  financeMetaRows.textContent = formatNumber(normalized.rowCount);
+  financeMetaColumns.textContent = formatNumber(normalized.columnCount);
+  financeSourceCount.textContent = formatNumber(normalized.sources.length);
+  financeRowCount.textContent = formatNumber(normalized.rowCount);
+  financeColumnCount.textContent = formatNumber(normalized.columnCount);
+  financeWarningText.hidden = true;
+  financeWarningText.textContent = "";
+
+  if (normalized.failedFiles?.length) {
+    appendFinanceWarningText(
+      `未读取财务数据源表：${normalized.failedFiles
+        .map((file) => `${file.filename}（${file.message}）`)
+        .join("；")}。`,
+    );
+  }
+
+  if (persist) {
+    appendFinanceWarningText(savePersistedFinanceData(normalized));
+  }
+
+  renderFinanceSourceTableList(normalized);
+  renderFinanceTable(normalized);
+}
+
+function deleteFinanceSourceTable(sourceId) {
+  if (!financeData || !sourceId) return;
+
+  const normalized = normalizeFinanceDataSources(financeData);
+  const nextSources = normalized.sources.filter((source) => source.id !== sourceId);
+
+  if (!nextSources.length) {
+    resetFinanceResult("已删除全部财务数据源表");
+    return;
+  }
+
+  const allowedSourceIds = new Set(nextSources.map((source) => source.id));
+  const nextRows = normalized.rows.filter((row) => allowedSourceIds.has(row.sourceId));
+  renderFinanceData(rebuildFinanceDataFromSources(nextSources, nextRows));
+}
+
+async function uploadFinanceFiles(files) {
+  const uploadList = [...(files || [])].filter(Boolean);
+  if (!uploadList.length) return;
+
+  const previousFileText = financeFileName.textContent;
+  financeFileName.textContent =
+    uploadList.length === 1
+      ? uploadList[0].name
+      : `${uploadList.length} 个文件：${uploadList.map((file) => file.name).join("、")}`;
+  setStatus("财务处理中");
+
+  try {
+    const parsedTables = [];
+    const failedFiles = [];
+
+    for (const file of uploadList) {
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const parsedResult = parseFinanceFile(file.name, arrayBuffer);
+        parsedTables.push(...parsedResult.tables);
+        failedFiles.push(...parsedResult.failedFiles);
+      } catch (error) {
+        failedFiles.push({
+          filename: file.name,
+          message: error.message || "解析失败",
+        });
+      }
+    }
+
+    if (!parsedTables.length) {
+      throw new Error(
+        failedFiles.length
+          ? failedFiles.map((file) => `${file.filename}：${file.message}`).join("；")
+          : "没有可读取的财务源数据。",
+      );
+    }
+
+    const appendedData = combineFinanceTables(parsedTables, failedFiles);
+    renderFinanceData(financeData ? mergeFinanceData(financeData, appendedData) : appendedData);
+    financeFileInput.value = "";
+    setStatus("财务已完成", "ready");
+  } catch (error) {
+    setStatus("财务处理失败", "error");
+    financeFileName.textContent = previousFileText;
+    appendFinanceWarningText(`财务源数据读取失败：${error.message}`);
+  }
+}
+
 function appendWarningText(message) {
   if (!message) return;
 
@@ -2161,6 +2759,27 @@ async function uploadFiles(files) {
   }
 }
 
+moduleTabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    setActiveModule(tab.dataset.moduleTab);
+  });
+});
+
+financeFileInput.addEventListener("change", (event) => {
+  uploadFinanceFiles(event.target.files);
+});
+
+financeAddSourceTableButton.addEventListener("click", () => {
+  financeFileInput.click();
+});
+
+financeSourceTableList.addEventListener("click", (event) => {
+  const deleteButton = event.target.closest("[data-delete-finance-source]");
+  if (!deleteButton) return;
+
+  deleteFinanceSourceTable(deleteButton.dataset.deleteFinanceSource);
+});
+
 fileInput.addEventListener("change", (event) => {
   uploadFiles(event.target.files);
 });
@@ -2288,7 +2907,27 @@ dropZone.addEventListener("drop", (event) => {
   uploadFiles(event.dataTransfer.files);
 });
 
+for (const eventName of ["dragenter", "dragover"]) {
+  financeDropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    financeDropZone.classList.add("is-dragging");
+  });
+}
+
+for (const eventName of ["dragleave", "drop"]) {
+  financeDropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    financeDropZone.classList.remove("is-dragging");
+  });
+}
+
+financeDropZone.addEventListener("drop", (event) => {
+  uploadFinanceFiles(event.dataTransfer.files);
+});
+
 setRandomHeadline();
+setActiveModule("inventory");
+clearLegacyFinanceData();
 
 const restoredParsedData = loadPersistedParsedData();
 if (restoredParsedData) {
@@ -2300,4 +2939,11 @@ if (restoredParsedData) {
 } else {
   renderSourceTableList();
   renderStoreList();
+}
+
+const restoredFinanceData = loadPersistedFinanceData();
+if (restoredFinanceData) {
+  renderFinanceData(restoredFinanceData, { persist: false });
+} else {
+  resetFinanceResult();
 }

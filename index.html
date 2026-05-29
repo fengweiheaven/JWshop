@@ -16,7 +16,19 @@
         <div id="statusPill" class="status-pill">等待上传</div>
       </header>
 
-      <main class="workspace">
+      <nav class="module-tabs" role="tablist" aria-label="业务板块">
+        <button class="module-tab is-active" type="button" role="tab" data-module-tab="inventory" aria-selected="true">
+          库存板块
+        </button>
+        <button class="module-tab" type="button" role="tab" data-module-tab="finance" aria-selected="false">
+          财务板块
+        </button>
+        <button class="module-tab" type="button" role="tab" data-module-tab="sales" aria-selected="false">
+          销售板块
+        </button>
+      </nav>
+
+      <main id="inventoryPanel" class="workspace module-panel" data-module-panel="inventory">
         <section class="store-area store-home-panel">
           <div class="store-section-header">
             <label>店铺</label>
@@ -134,6 +146,101 @@
           </div>
         </section>
       </main>
+
+      <section id="financePanel" class="module-panel finance-workspace" data-module-panel="finance" hidden>
+        <section class="control-panel">
+          <div class="field-group">
+            <label for="financeFileInput">财务源数据文件</label>
+            <div id="financeDropZone" class="drop-zone">
+              <input id="financeFileInput" type="file" accept=".xlsx,.xlsm,.csv" multiple />
+              <strong>选择一个或多个 Excel / CSV</strong>
+              <span id="financeFileName">未选择文件</span>
+            </div>
+            <div class="source-table-panel">
+              <div class="source-table-header">
+                <span>财务数据源表</span>
+                <button id="financeAddSourceTableButton" class="mini-edit-button" type="button">
+                  新增表
+                </button>
+              </div>
+              <div id="financeSourceTableList" class="source-table-list">
+                <p class="empty-note">暂无财务数据源表</p>
+              </div>
+            </div>
+          </div>
+
+          <dl class="meta-list">
+            <div>
+              <dt>数据源表</dt>
+              <dd id="financeSheetName">-</dd>
+            </div>
+            <div>
+              <dt>数据行</dt>
+              <dd id="financeMetaRows">0</dd>
+            </div>
+            <div>
+              <dt>最大列数</dt>
+              <dd id="financeMetaColumns">0</dd>
+            </div>
+          </dl>
+
+          <p id="financeWarningText" class="warning-text" hidden></p>
+        </section>
+
+        <section class="result-panel">
+          <div class="summary-bar finance-summary">
+            <div>
+              <span class="summary-label">数据源表</span>
+              <strong id="financeSourceCount">0</strong>
+            </div>
+            <div>
+              <span class="summary-label">数据行</span>
+              <strong id="financeRowCount">0</strong>
+            </div>
+            <div>
+              <span class="summary-label">最大列数</span>
+              <strong id="financeColumnCount">0</strong>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table id="financeDataTable" class="finance-data-table">
+              <thead id="financeTableHead">
+                <tr>
+                  <th>户头</th>
+                  <th>销售时间</th>
+                  <th>账单日期</th>
+                  <th>账单名称</th>
+                  <th>商品ID</th>
+                  <th>商品名称</th>
+                  <th>销售规格</th>
+                  <th>仓库ID</th>
+                  <th>仓库名称</th>
+                  <th>销售数量</th>
+                  <th>商家报价（元）</th>
+                  <th>多多售价</th>
+                  <th>结算金额</th>
+                  <th>买价</th>
+                  <th>毛利额</th>
+                  <th>备注</th>
+                </tr>
+              </thead>
+              <tbody id="financeTableBody">
+                <tr>
+                  <td colspan="16" class="empty-cell">上传财务源数据后展示账单字段</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="salesPanel" class="module-panel module-placeholder" data-module-panel="sales" hidden>
+        <div>
+          <p class="eyebrow">销售板块</p>
+          <h2>销售数据待接入</h2>
+        </div>
+      </section>
     </div>
 
     <div id="storeEditor" class="modal-backdrop" hidden>

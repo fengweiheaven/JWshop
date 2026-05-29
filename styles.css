@@ -128,6 +128,119 @@ h1 {
   background: var(--danger-bg);
 }
 
+.module-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 6px;
+  border: 1px solid rgba(198, 208, 201, 0.84);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 254, 250, 0.9), rgba(245, 247, 244, 0.82)),
+    var(--surface-muted);
+  box-shadow: var(--shadow-soft);
+}
+
+.module-tab {
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 15px;
+  font-weight: 900;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.module-tab:hover {
+  color: var(--accent-dark);
+  background: rgba(220, 238, 232, 0.48);
+}
+
+.module-tab.is-active {
+  border-color: rgba(17, 109, 99, 0.36);
+  color: var(--accent-dark);
+  background:
+    linear-gradient(180deg, rgba(255, 254, 250, 0.98), rgba(220, 238, 232, 0.92)),
+    var(--accent-soft);
+  box-shadow: 0 8px 18px rgba(17, 109, 99, 0.1);
+}
+
+.module-panel[hidden] {
+  display: none;
+}
+
+.module-placeholder {
+  min-height: 360px;
+  padding: 28px;
+  border: 1px solid rgba(198, 208, 201, 0.84);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(17, 109, 99, 0.08), rgba(255, 254, 250, 0) 44%),
+    linear-gradient(180deg, rgba(255, 254, 250, 0.98), rgba(246, 248, 244, 0.92));
+  box-shadow: var(--shadow);
+}
+
+.module-placeholder h2 {
+  margin: 4px 0 0;
+  font-size: 24px;
+  line-height: 1.25;
+}
+
+.finance-workspace {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.finance-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.finance-data-table {
+  min-width: 1780px;
+}
+
+.finance-data-table th,
+.finance-data-table td {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.finance-data-table th:nth-child(10),
+.finance-data-table td:nth-child(10),
+.finance-data-table th:nth-child(11),
+.finance-data-table td:nth-child(11),
+.finance-data-table th:nth-child(12),
+.finance-data-table td:nth-child(12),
+.finance-data-table th:nth-child(13),
+.finance-data-table td:nth-child(13),
+.finance-data-table th:nth-child(14),
+.finance-data-table td:nth-child(14),
+.finance-data-table th:nth-child(15),
+.finance-data-table td:nth-child(15) {
+  text-align: right;
+}
+
+.finance-data-table th:first-child,
+.finance-data-table td:first-child {
+  width: 7%;
+}
+
+.finance-limit-note {
+  color: var(--amber);
+  background: var(--danger-bg);
+  font-weight: 800;
+  text-align: left;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
@@ -1180,6 +1293,10 @@ tbody tr:hover {
     grid-template-columns: 1fr;
   }
 
+  .finance-workspace {
+    grid-template-columns: 1fr;
+  }
+
   .control-panel {
     position: static;
   }
@@ -1188,6 +1305,16 @@ tbody tr:hover {
 @media (max-width: 560px) {
   .app-shell {
     width: calc(100vw - 8px);
+  }
+
+  .module-tabs {
+    gap: 6px;
+    padding: 5px;
+  }
+
+  .module-tab {
+    min-height: 40px;
+    font-size: 13px;
   }
 
   .modal-backdrop {
@@ -1219,6 +1346,10 @@ tbody tr:hover {
   }
 
   .summary-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .finance-summary {
     grid-template-columns: 1fr;
   }
 
