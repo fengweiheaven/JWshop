@@ -41,16 +41,21 @@ const restockMuteCheckbox = document.querySelector("#restockMuteCheckbox");
 const closeRestockButton = document.querySelector("#closeRestockButton");
 const financeFileInput = document.querySelector("#financeFileInput");
 const financeDropZone = document.querySelector("#financeDropZone");
+const financeSubmoduleTabs = document.querySelectorAll("[data-finance-submodule-tab]");
+const financeFileLabel = document.querySelector("#financeFileLabel");
 const financeFileName = document.querySelector("#financeFileName");
 const financeAddSourceTableButton = document.querySelector("#financeAddSourceTableButton");
+const financeSourceTableTitle = document.querySelector("#financeSourceTableTitle");
 const financeSourceTableList = document.querySelector("#financeSourceTableList");
 const financeSheetName = document.querySelector("#financeSheetName");
 const financeMetaRows = document.querySelector("#financeMetaRows");
 const financeMetaColumns = document.querySelector("#financeMetaColumns");
 const financeWarningText = document.querySelector("#financeWarningText");
-const financeSourceCount = document.querySelector("#financeSourceCount");
-const financeRowCount = document.querySelector("#financeRowCount");
-const financeColumnCount = document.querySelector("#financeColumnCount");
+const financeCreditTotal = document.querySelector("#financeCreditTotal");
+const financeInternalTotal = document.querySelector("#financeInternalTotal");
+const financePersonSummaryTitle = document.querySelector("#financePersonSummaryTitle");
+const financePersonSummaryHead = document.querySelector("#financePersonSummaryHead");
+const financePersonSummaryBody = document.querySelector("#financePersonSummaryBody");
 const financeTableHead = document.querySelector("#financeTableHead");
 const financeTableBody = document.querySelector("#financeTableBody");
 const salesFileInput = document.querySelector("#salesFileInput");
@@ -77,6 +82,71 @@ const LEGACY_FINANCE_DATA_KEYS = [
   "inventory-tool-finance-data-v2",
   "inventory-tool-finance-data-v3",
 ];
+const FINANCE_SUBMODULES = {
+  credit: {
+    label: "挂账",
+    dataKey: FINANCE_DATA_KEY,
+    targetSheetNames: ["挂账", "挂帐"],
+    personLabel: "支付人",
+    totalLabel: "挂账总金额",
+    personAliases: ["支付人", "付款人", "支付方", "付款方", "付款账户", "客户", "姓名"],
+    amountAliases: [
+      "挂账总金额",
+      "挂账金额",
+      "金额",
+      "总金额",
+      "总额",
+      "挂账总额",
+      "挂账款",
+      "欠款金额",
+      "欠款",
+      "支付金额",
+      "付款金额",
+      "支出金额",
+      "应付金额",
+      "已付金额",
+      "挂账",
+      "合计",
+    ],
+    fileLabel: "挂账源数据文件",
+    sourceTitle: "挂账数据源表",
+    emptySourceText: "暂无挂账数据源表",
+    emptyTableText: "上传挂账源数据后展示表内容",
+    restoredText: "已恢复上次挂账数据",
+    deletedAllText: "已删除全部挂账数据源表",
+    noReadableText: "没有可读取的挂账源数据。",
+    readFailedPrefix: "挂账源数据读取失败",
+  },
+  internal: {
+    label: "内部收款",
+    dataKey: "inventory-tool-finance-internal-collection-data-v1",
+    targetSheetNames: ["内部收款"],
+    personLabel: "收款人",
+    totalLabel: "收款总额",
+    personAliases: ["收款人", "内部收款人", "收款方", "收款账户", "收款账号", "员工", "姓名"],
+    amountAliases: [
+      "内部收款总额",
+      "内部收款金额",
+      "收款总额",
+      "收款金额",
+      "实收金额",
+      "到账金额",
+      "收入金额",
+      "总金额",
+      "总额",
+      "金额",
+      "合计",
+    ],
+    fileLabel: "内部收款源数据文件",
+    sourceTitle: "内部收款数据源表",
+    emptySourceText: "暂无内部收款数据源表",
+    emptyTableText: "上传内部收款源数据后展示表内容",
+    restoredText: "已恢复上次内部收款数据",
+    deletedAllText: "已删除全部内部收款数据源表",
+    noReadableText: "没有可读取的内部收款源数据。",
+    readFailedPrefix: "内部收款源数据读取失败",
+  },
+};
 const STORE_BACKUP_KEY = "inventory-tool-store-settings-backup-v1";
 const RESTOCK_MUTE_KEY = "inventory-tool-restock-muted-until-v1";
 const LOW_STOCK_THRESHOLD = 200;
@@ -189,7 +259,12 @@ const columnAliases = {
 };
 
 let parsedData = null;
+let activeFinanceSubmodule = "credit";
 let financeData = null;
+let financeDataByModule = {
+  credit: null,
+  internal: null,
+};
 let salesData = null;
 let currentSummary = [];
 let editingStoreId = null;
@@ -235,6 +310,52 @@ function setActiveModule(moduleName) {
   modulePanels.forEach((panel) => {
     panel.hidden = panel.dataset.modulePanel !== moduleName;
   });
+}
+
+function getFinanceSubmoduleConfig(moduleName = activeFinanceSubmodule) {
+  return FINANCE_SUBMODULES[moduleName] || FINANCE_SUBMODULES.credit;
+}
+
+function getFinanceDataKey(moduleName = activeFinanceSubmodule) {
+  return getFinanceSubmoduleConfig(moduleName).dataKey;
+}
+
+function getActiveFinanceData() {
+  return financeDataByModule[activeFinanceSubmodule] || null;
+}
+
+function setActiveFinanceData(data) {
+  financeDataByModule[activeFinanceSubmodule] = data;
+  financeData = data;
+}
+
+function updateFinanceSubmoduleLabels() {
+  const config = getFinanceSubmoduleConfig();
+  if (financeFileLabel) financeFileLabel.textContent = config.fileLabel;
+  if (financeSourceTableTitle) financeSourceTableTitle.textContent = config.sourceTitle;
+  if (financePersonSummaryTitle) {
+    financePersonSummaryTitle.textContent = `${config.personLabel}汇总`;
+  }
+}
+
+function setActiveFinanceSubmodule(moduleName) {
+  if (!FINANCE_SUBMODULES[moduleName]) return;
+
+  activeFinanceSubmodule = moduleName;
+  financeData = getActiveFinanceData();
+  financeSubmoduleTabs.forEach((tab) => {
+    const isActive = tab.dataset.financeSubmoduleTab === moduleName;
+    tab.classList.toggle("is-active", isActive);
+    tab.setAttribute("aria-selected", String(isActive));
+  });
+  updateFinanceSubmoduleLabels();
+  renderFinanceTopTotals();
+
+  if (financeData) {
+    renderFinanceData(financeData, { persist: false });
+  } else {
+    resetFinanceResult(undefined, { clearPersisted: false });
+  }
 }
 
 function formatNumber(value) {
@@ -284,6 +405,51 @@ function normalizeProductName(value) {
     .replace(/[()\[\]（）【】\s_\-—,，.。:：;；、/／\\*×xX]/g, "")
     .replace(/[味汁]$/g, "")
     .toLowerCase();
+}
+
+function isOrderedSubsequence(needle, haystack) {
+  if (!needle || !haystack || needle.length > haystack.length) return false;
+
+  let needleIndex = 0;
+  for (const char of haystack) {
+    if (char === needle[needleIndex]) {
+      needleIndex += 1;
+      if (needleIndex === needle.length) return true;
+    }
+  }
+  return false;
+}
+
+function getSharedPrefixLength(left, right) {
+  const limit = Math.min(left.length, right.length);
+  let index = 0;
+  while (index < limit && left[index] === right[index]) index += 1;
+  return index;
+}
+
+function getSharedSuffixLength(left, right) {
+  const limit = Math.min(left.length, right.length);
+  let index = 0;
+  while (
+    index < limit &&
+    left[left.length - 1 - index] === right[right.length - 1 - index]
+  ) {
+    index += 1;
+  }
+  return index;
+}
+
+function getOrderedProductNameMatchScore(configured, actual) {
+  const shorter = configured.length <= actual.length ? configured : actual;
+  const longer = configured.length <= actual.length ? actual : configured;
+  if (shorter.length < 4 || !isOrderedSubsequence(shorter, longer)) return 0;
+
+  const coverage = shorter.length / longer.length;
+  const sharedEdges =
+    getSharedPrefixLength(shorter, longer) + getSharedSuffixLength(shorter, longer);
+  if (coverage < 0.5 && sharedEdges < 4) return 0;
+
+  return Math.round(2000 * coverage) + shorter.length * 10;
 }
 
 function parseUnitPrice(value) {
@@ -376,6 +542,11 @@ function getProductMatchScore(configuredProduct, actualProduct) {
     }
     if (configured.includes(actual)) {
       return Math.max(bestScore, 1000 + actual.length);
+    }
+
+    const orderedScore = getOrderedProductNameMatchScore(configured, actual);
+    if (orderedScore) {
+      return Math.max(bestScore, 2000 + orderedScore);
     }
 
     return bestScore;
@@ -1349,53 +1520,314 @@ function mergeFinanceHeaders(sources, columnCount) {
   });
 }
 
-function buildFinanceFieldIndexes(headers) {
-  const indexes = {};
-  const headerIndexes = new Map();
+function normalizeFinanceHeaders(headers, columnCount) {
+  return Array.from({ length: columnCount }, (_, index) => {
+    const header = normalizeFinanceCellValue(headers?.[index]).trim();
+    return header || `列${index + 1}`;
+  });
+}
 
+function isFinanceDateHeader(header) {
+  return /(日期|时间|date|time)/i.test(String(header || ""));
+}
+
+function normalizeFinanceSourceValue(header, value) {
+  if (isFinanceDateHeader(header)) return normalizeFinanceDateValue(value);
+  return normalizeFinanceCellValue(value).trim();
+}
+
+function buildFinanceRecordFromValues(headers, values) {
+  return Object.fromEntries(headers.map((header, index) => [header, values[index] || ""]));
+}
+
+function buildFinanceValuesFromRecord(headers, record = {}) {
+  return headers.map((header, index) =>
+    normalizeFinanceSourceValue(
+      header,
+      record[header] ?? record[FINANCE_BILL_FIELDS[index]] ?? "",
+    ),
+  );
+}
+
+function getFinanceColumnCountFromSource(source, rows = []) {
+  return Math.max(
+    source?.columnCount || 0,
+    source?.headers?.length || 0,
+    ...rows.map((row) => row.values?.length || 0),
+  );
+}
+
+function getFinanceDisplayHeaders(data) {
+  const columnCount = Math.max(
+    data?.columnCount || 0,
+    data?.headers?.length || 0,
+    ...(Array.isArray(data?.rows) ? data.rows.map((row) => row.values?.length || 0) : []),
+  );
+  return normalizeFinanceHeaders(
+    data?.headers || FINANCE_BILL_FIELDS,
+    columnCount || FINANCE_BILL_FIELDS.length,
+  );
+}
+
+function normalizeFinanceSheetName(value) {
+  return normalizeLabel(value);
+}
+
+function isCsvFinanceTable(table) {
+  return normalizeFinanceSheetName(table?.sheetName) === "csv";
+}
+
+function financeSheetNameMatches(table, targetSheetNames = []) {
+  const sheetName = normalizeFinanceSheetName(table?.sheetName);
+  return targetSheetNames.some((targetSheetName) => {
+    const target = normalizeFinanceSheetName(targetSheetName);
+    return target && sheetName === target;
+  });
+}
+
+function getFinanceTargetTables(readableTables, targetSheetNames = []) {
+  if (!targetSheetNames.length) return readableTables;
+  if (readableTables.length === 1 && isCsvFinanceTable(readableTables[0])) {
+    return readableTables;
+  }
+
+  return readableTables.filter((table) =>
+    financeSheetNameMatches(table, targetSheetNames),
+  );
+}
+
+function getFinanceHeaderScore(headers, moduleName = activeFinanceSubmodule) {
+  const config = getFinanceSubmoduleConfig(moduleName);
+  const personScore = Math.max(
+    0,
+    ...headers.map((header) => aliasScore(header, config.personAliases)),
+  );
+  const amountScore = Math.max(
+    0,
+    ...headers.map((header) => aliasScore(header, config.amountAliases)),
+  );
+
+  return {
+    score: amountScore * 2 + personScore,
+    personScore,
+    amountScore,
+  };
+}
+
+function findFinanceHeaderRow(rows, moduleName = activeFinanceSubmodule) {
+  const candidates = rows.slice(0, Math.min(30, rows.length));
+  let best = null;
+
+  candidates.forEach((row, index) => {
+    if (isEmptyRow(row)) return;
+    const columnCount = row.length;
+    const headers = buildFinanceHeaders(row, columnCount);
+    const scores = getFinanceHeaderScore(headers, moduleName);
+    if (!scores.amountScore) return;
+
+    if (
+      !best ||
+      scores.score > best.score ||
+      (scores.score === best.score && index < best.index)
+    ) {
+      best = { index, headers, columnCount, ...scores };
+    }
+  });
+
+  return best;
+}
+
+function findFinanceColumnIndex(headers, aliases = []) {
+  const candidates = [];
   headers.forEach((header, index) => {
-    const key = normalizeLabel(header);
-    if (key && !headerIndexes.has(key)) headerIndexes.set(key, index);
+    const score = aliasScore(header, aliases);
+    if (score) candidates.push({ score, index });
   });
 
-  FINANCE_BILL_FIELDS.forEach((field) => {
-    indexes[field] = headerIndexes.has(normalizeLabel(field))
-      ? headerIndexes.get(normalizeLabel(field))
-      : null;
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => b.score - a.score || a.index - b.index);
+  return candidates[0].index;
+}
+
+function parseFinanceAmount(value) {
+  return Math.abs(parseNumber(value, 0));
+}
+
+function financeAmountColumnHasValues(rows, amountIndex, headers = []) {
+  if (amountIndex === null) return false;
+  return rows.some((row) => {
+    const rawValue = row.values?.[amountIndex] ?? row.record?.[headers[amountIndex]];
+    return parseFinanceAmount(rawValue) > 0;
+  });
+}
+
+function getFinanceSummaryContext(data, moduleName = activeFinanceSubmodule) {
+  const config = getFinanceSubmoduleConfig(moduleName);
+  const normalized = normalizeFinanceDataSources(data);
+  if (!normalized?.rows?.length) return null;
+
+  const directHeaders = getFinanceDisplayHeaders(normalized);
+  const directAmountIndex = findFinanceColumnIndex(directHeaders, config.amountAliases);
+  const directPersonIndex = findFinanceColumnIndex(directHeaders, config.personAliases);
+  if (
+    directAmountIndex !== null &&
+    financeAmountColumnHasValues(normalized.rows, directAmountIndex, directHeaders)
+  ) {
+    return {
+      normalized,
+      headers: directHeaders,
+      rows: normalized.rows,
+      amountIndex: directAmountIndex,
+      personIndex: directPersonIndex,
+    };
+  }
+
+  const headerCandidate = findFinanceHeaderRow(
+    normalized.rows.map((row) => row.values || []),
+    moduleName,
+  );
+  if (!headerCandidate) {
+    return {
+      normalized,
+      headers: directHeaders,
+      rows: normalized.rows,
+      amountIndex: null,
+      personIndex: directPersonIndex,
+    };
+  }
+
+  return {
+    normalized,
+    headers: headerCandidate.headers,
+    rows: normalized.rows.slice(headerCandidate.index + 1),
+    amountIndex: findFinanceColumnIndex(headerCandidate.headers, config.amountAliases),
+    personIndex: findFinanceColumnIndex(headerCandidate.headers, config.personAliases),
+  };
+}
+
+function getFinanceSummary(data, moduleName = activeFinanceSubmodule) {
+  const config = getFinanceSubmoduleConfig(moduleName);
+  const context = getFinanceSummaryContext(data, moduleName);
+  if (!context?.normalized?.rows?.length) {
+    return { total: 0, items: [], missingFields: [] };
+  }
+
+  const { headers, rows, amountIndex, personIndex } = context;
+  const missingFields = [];
+  if (amountIndex === null) missingFields.push(config.totalLabel);
+  if (personIndex === null) missingFields.push(config.personLabel);
+
+  if (amountIndex === null) return { total: 0, items: [], missingFields };
+
+  const total = rows.reduce(
+    (sum, row) =>
+      sum + parseFinanceAmount(row.values?.[amountIndex] ?? row.record?.[headers[amountIndex]]),
+    0,
+  );
+
+  if (personIndex === null) return { total, items: [], missingFields };
+
+  const grouped = new Map();
+  rows.forEach((row) => {
+    const person =
+      normalizeFinanceCellValue(row.values?.[personIndex] ?? row.record?.[headers[personIndex]])
+        .trim() || `未填写${config.personLabel}`;
+    const amount = parseFinanceAmount(
+      row.values?.[amountIndex] ?? row.record?.[headers[amountIndex]],
+    );
+    if (!amount) return;
+
+    const key = normalizeLabel(person) || person;
+    const existing = grouped.get(key) || { person, total: 0, rows: 0 };
+    existing.total += amount;
+    existing.rows += 1;
+    grouped.set(key, existing);
   });
 
-  return indexes;
-}
-
-function hasFinanceBillFields(fieldIndexes) {
-  return (
-    fieldIndexes["账单名称"] !== null &&
-    (fieldIndexes["账单日期"] !== null || fieldIndexes["销售时间"] !== null) &&
-    (fieldIndexes["结算金额"] !== null || fieldIndexes["销售数量"] !== null)
+  const items = [...grouped.values()].sort(
+    (a, b) => b.total - a.total || a.person.localeCompare(b.person, "zh-Hans-CN"),
   );
+
+  return {
+    total,
+    items,
+    missingFields,
+  };
 }
 
-function buildFinanceRecord(row, fieldIndexes) {
-  return Object.fromEntries(
-    FINANCE_BILL_FIELDS.map((field) => {
-      const index = fieldIndexes[field];
-      return [field, index === null ? "" : normalizeFinanceFieldValue(field, row[index])];
-    }),
-  );
+function renderFinanceTopTotals() {
+  if (financeCreditTotal) {
+    financeCreditTotal.closest(".summary-bar > div")?.toggleAttribute(
+      "hidden",
+      activeFinanceSubmodule !== "credit",
+    );
+    financeCreditTotal.textContent = formatMoney(
+      getFinanceSummary(financeDataByModule.credit, "credit").total,
+    );
+  }
+  if (financeInternalTotal) {
+    financeInternalTotal.closest(".summary-bar > div")?.toggleAttribute(
+      "hidden",
+      activeFinanceSubmodule !== "internal",
+    );
+    financeInternalTotal.textContent = formatMoney(
+      getFinanceSummary(financeDataByModule.internal, "internal").total,
+    );
+  }
 }
 
-function hasFinanceRecordValue(record) {
-  return FINANCE_BILL_FIELDS.some((field) => record[field]);
-}
+function renderFinancePersonSummary(data) {
+  if (!financePersonSummaryHead || !financePersonSummaryBody) return;
 
-function financeRecordToValues(record) {
-  return FINANCE_BILL_FIELDS.map((field) => normalizeFinanceFieldValue(field, record?.[field]));
+  const config = getFinanceSubmoduleConfig();
+  const summary = getFinanceSummary(data);
+  const headers = [config.personLabel, config.totalLabel];
+  financePersonSummaryHead.innerHTML = `<tr>${headers
+    .map((header) => `<th>${escapeHtml(header)}</th>`)
+    .join("")}</tr>`;
+
+  if (!data?.rows?.length) {
+    financePersonSummaryBody.innerHTML = `<tr><td colspan="2" class="empty-cell">${escapeHtml(
+      config.emptyTableText,
+    )}</td></tr>`;
+    return;
+  }
+
+  if (summary.missingFields.length) {
+    financePersonSummaryBody.innerHTML = `<tr><td colspan="2" class="empty-cell">未识别到${escapeHtml(
+      summary.missingFields.join("、"),
+    )}列，请检查${escapeHtml(config.label)}分页表头。</td></tr>`;
+    return;
+  }
+
+  if (!summary.items.length) {
+    financePersonSummaryBody.innerHTML = `<tr><td colspan="2" class="empty-cell">暂无可汇总数据</td></tr>`;
+    return;
+  }
+
+  financePersonSummaryBody.innerHTML = summary.items
+    .map(
+      (item) => `<tr>
+        <td>${escapeHtml(item.person)}</td>
+        <td>${escapeHtml(formatMoney(item.total))}</td>
+      </tr>`,
+    )
+    .join("");
 }
 
 function parseFinanceFile(filename, arrayBuffer) {
-  const readableTables = readFileTables(filename, arrayBuffer);
+  const config = getFinanceSubmoduleConfig();
+  const targetSheetNames = config.targetSheetNames || [];
+  const readableTables = getFinanceTargetTables(
+    readFileTables(filename, arrayBuffer),
+    targetSheetNames,
+  );
   const tables = [];
   const failedFiles = [];
+
+  if (!readableTables.length) {
+    throw new Error(`未找到“${targetSheetNames[0] || config.label}”分页。`);
+  }
 
   readableTables.forEach((table) => {
     try {
@@ -1406,34 +1838,37 @@ function parseFinanceFile(filename, arrayBuffer) {
         throw new Error("该分页没有可展示的数据行。");
       }
 
-      const sourceColumnCount = rowsWithIndex.reduce(
-        (max, { row }) => Math.max(max, row.length),
-        0,
+      const detectedHeader = findFinanceHeaderRow(
+        rowsWithIndex.map(({ row }) => row),
+        activeFinanceSubmodule,
       );
-      const sourceHeaders = buildFinanceHeaders(rowsWithIndex[0].row, sourceColumnCount);
-      const fieldIndexes = buildFinanceFieldIndexes(sourceHeaders);
-      if (!hasFinanceBillFields(fieldIndexes)) {
-        throw new Error("未识别到财务账单字段。");
-      }
-
-      const dataRows = rowsWithIndex.slice(1);
+      const headerIndex = detectedHeader?.index ?? 0;
+      const sourceColumnCount = rowsWithIndex
+        .slice(headerIndex)
+        .reduce((max, { row }) => Math.max(max, row.length), 0);
+      const sourceHeaders = detectedHeader
+        ? normalizeFinanceHeaders(detectedHeader.headers, sourceColumnCount)
+        : buildFinanceHeaders(rowsWithIndex[0].row, sourceColumnCount);
+      const dataRows = rowsWithIndex.slice(headerIndex + 1);
       if (!dataRows.length) {
-        throw new Error("该分页只有表头，没有可展示的账单数据行。");
+        throw new Error("该分页只有表头，没有可展示的数据行。");
       }
 
       const rows = dataRows
         .map(({ row, rowNumber }) => {
-          const record = buildFinanceRecord(row, fieldIndexes);
+          const values = sourceHeaders.map((header, index) =>
+            normalizeFinanceSourceValue(header, row[index]),
+          );
           return {
             sourceRow: rowNumber,
-            record,
-            values: financeRecordToValues(record),
+            record: buildFinanceRecordFromValues(sourceHeaders, values),
+            values,
           };
         })
-        .filter((row) => hasFinanceRecordValue(row.record));
+        .filter((row) => row.values.some(Boolean));
 
       if (!rows.length) {
-        throw new Error("该分页没有可展示的账单数据行。");
+        throw new Error("该分页没有可展示的数据行。");
       }
 
       tables.push({
@@ -1441,8 +1876,8 @@ function parseFinanceFile(filename, arrayBuffer) {
         sheetName: table.sheetName,
         sheetNames: table.sheetNames || [table.sheetName],
         rowCount: rows.length,
-        columnCount: FINANCE_BILL_FIELDS.length,
-        headers: FINANCE_BILL_FIELDS,
+        columnCount: sourceColumnCount,
+        headers: sourceHeaders,
         rows,
       });
     } catch (error) {
@@ -1468,33 +1903,39 @@ function rebuildFinanceDataFromSources(sources, rows, options = {}) {
   const normalizedSources = sources.map((source, index) => {
     const id = source.id || makeLegacySourceId(source, index);
     const sourceRows = rows.filter((row) => row.sourceId === id);
+    const columnCount = getFinanceColumnCountFromSource(source, sourceRows);
+    const headers = normalizeFinanceHeaders(source.headers || FINANCE_BILL_FIELDS, columnCount);
     return {
       ...source,
       id,
       rowCount: sourceRows.length || source.rowCount || 0,
-      columnCount: FINANCE_BILL_FIELDS.length,
-      headers: FINANCE_BILL_FIELDS,
+      columnCount,
+      headers,
     };
   });
+
+  const columnCount = Math.max(
+    1,
+    ...normalizedSources.map((source) => source.columnCount || 0),
+    ...rows.map((row) => row.values?.length || 0),
+  );
+  const headers = mergeFinanceHeaders(normalizedSources, columnCount);
+  const sourceById = new Map(normalizedSources.map((source) => [source.id, source]));
   const normalizedRows = rows.map((row) => {
-    const record = row.record
-      ? Object.fromEntries(
-          FINANCE_BILL_FIELDS.map((field) => [
-            field,
-            normalizeFinanceFieldValue(field, row.record[field]),
-          ]),
+    const sourceHeaders = sourceById.get(row.sourceId)?.headers || headers;
+    const values = Array.isArray(row.values)
+      ? Array.from({ length: columnCount }, (_, index) =>
+          normalizeFinanceSourceValue(
+            sourceHeaders[index] || headers[index],
+            row.values[index],
+          ),
         )
-      : Object.fromEntries(
-          FINANCE_BILL_FIELDS.map((field, index) => [
-            field,
-            normalizeFinanceFieldValue(field, row.values?.[index]),
-          ]),
-        );
+      : buildFinanceValuesFromRecord(headers, row.record);
 
     return {
       ...row,
-      record,
-      values: financeRecordToValues(record),
+      record: buildFinanceRecordFromValues(headers, values),
+      values,
     };
   });
 
@@ -1508,8 +1949,8 @@ function rebuildFinanceDataFromSources(sources, rows, options = {}) {
         ? `已读取 ${normalizedSources.length} 个财务数据源表`
         : normalizedSources[0]?.sheetName || "-",
     rowCount: normalizedRows.length,
-    columnCount: FINANCE_BILL_FIELDS.length,
-    headers: FINANCE_BILL_FIELDS,
+    columnCount,
+    headers,
     rows: normalizedRows,
     sources: normalizedSources,
     failedFiles: options.failedFiles || [],
@@ -1523,8 +1964,8 @@ function combineFinanceTables(tables, failedFiles = []) {
     sheetName: table.sheetName,
     sheetNames: table.sheetNames || [],
     rowCount: table.rowCount || 0,
-    columnCount: FINANCE_BILL_FIELDS.length,
-    headers: FINANCE_BILL_FIELDS,
+    columnCount: table.columnCount || table.headers?.length || 0,
+    headers: table.headers || [],
   }));
   const rows = tables.flatMap((table, index) => {
     const source = sources[index];
@@ -1551,15 +1992,23 @@ function isValidFinanceData(data) {
 function normalizeFinanceDataSources(data) {
   if (!isValidFinanceData(data)) return null;
 
-  const sources = data.sources.map((source, index) => ({
-    id: source.id || makeLegacySourceId(source, index),
-    filename: source.filename || data.filename || "已上传财务数据",
-    sheetName: source.sheetName || data.sheetName || "-",
-    sheetNames: source.sheetNames || [],
-    rowCount: source.rowCount || 0,
-    columnCount: FINANCE_BILL_FIELDS.length,
-    headers: FINANCE_BILL_FIELDS,
-  }));
+  const sources = data.sources.map((source, index) => {
+    const columnCount = Math.max(
+      source.columnCount || 0,
+      source.headers?.length || 0,
+      data.columnCount || 0,
+      data.headers?.length || 0,
+    ) || FINANCE_BILL_FIELDS.length;
+    return {
+      id: source.id || makeLegacySourceId(source, index),
+      filename: source.filename || data.filename || "已上传财务数据",
+      sheetName: source.sheetName || data.sheetName || "-",
+      sheetNames: source.sheetNames || [],
+      rowCount: source.rowCount || 0,
+      columnCount,
+      headers: normalizeFinanceHeaders(source.headers || data.headers || FINANCE_BILL_FIELDS, columnCount),
+    };
+  });
   const fallbackSource = sources[0];
   const sourceByFileSheet = new Map(
     sources.map((source) => [`${source.filename}::${source.sheetName}`, source]),
@@ -1569,18 +2018,25 @@ function normalizeFinanceDataSources(data) {
       sources.find((source) => source.id === row.sourceId) ||
       sourceByFileSheet.get(`${row.sourceFile || data.filename}::${row.sourceSheet || data.sheetName}`) ||
       fallbackSource;
+    const sourceColumnCount = Math.max(
+      matchedSource?.columnCount || 0,
+      row.values?.length || 0,
+      row.record ? Object.keys(row.record).length : 0,
+    ) || FINANCE_BILL_FIELDS.length;
+    const sourceHeaders = normalizeFinanceHeaders(
+      matchedSource?.headers || data.headers || FINANCE_BILL_FIELDS,
+      sourceColumnCount,
+    );
+    const values = Array.isArray(row.values)
+      ? Array.from({ length: sourceColumnCount }, (_, index) =>
+          normalizeFinanceSourceValue(sourceHeaders[index], row.values[index]),
+        )
+      : buildFinanceValuesFromRecord(sourceHeaders, row.record);
 
     return {
       ...row,
-      record: row.record
-        ? Object.fromEntries(
-            FINANCE_BILL_FIELDS.map((field) => [
-              field,
-              normalizeFinanceFieldValue(field, row.record[field]),
-            ]),
-          )
-        : null,
-      values: Array.isArray(row.values) ? row.values.map(normalizeFinanceCellValue) : [],
+      record: buildFinanceRecordFromValues(sourceHeaders, values),
+      values,
       sourceId: row.sourceId || matchedSource?.id || "",
       sourceFile: row.sourceFile || matchedSource?.filename || data.filename || "",
       sourceSheet: row.sourceSheet || matchedSource?.sheetName || data.sheetName || "",
@@ -1607,8 +2063,8 @@ function mergeFinanceData(existingData, appendedData) {
   );
 }
 
-function loadPersistedFinanceData() {
-  const saved = parseJsonFromStorage(FINANCE_DATA_KEY, null);
+function loadPersistedFinanceData(moduleName = activeFinanceSubmodule) {
+  const saved = parseJsonFromStorage(getFinanceDataKey(moduleName), null);
   const normalized = normalizeFinanceDataSources(saved?.data);
   return normalized;
 }
@@ -1619,12 +2075,12 @@ function clearLegacyFinanceData() {
   });
 }
 
-function savePersistedFinanceData(data) {
+function savePersistedFinanceData(data, moduleName = activeFinanceSubmodule) {
   if (!isValidFinanceData(data)) return "";
 
   try {
     localStorage.setItem(
-      FINANCE_DATA_KEY,
+      getFinanceDataKey(moduleName),
       JSON.stringify({
         savedAt: new Date().toISOString(),
         data,
@@ -1637,14 +2093,15 @@ function savePersistedFinanceData(data) {
 }
 
 function formatFinanceFileText(data) {
+  const config = getFinanceSubmoduleConfig();
   const sources = Array.isArray(data?.sources) ? data.sources : [];
   if (sources.length > 1) {
-    return `${sources.length} 个财务数据源表：${sources
+    return `${sources.length} 个${config.sourceTitle}：${sources
       .map((source) => `${source.filename}/${source.sheetName || "-"}`)
       .join("、")}`;
   }
 
-  return sources[0]?.filename || data?.filename || "已恢复上次财务数据";
+  return sources[0]?.filename || data?.filename || config.restoredText;
 }
 
 function appendFinanceWarningText(message) {
@@ -1656,9 +2113,10 @@ function appendFinanceWarningText(message) {
 }
 
 function renderFinanceSourceTableList(data = financeData) {
+  const config = getFinanceSubmoduleConfig();
   const normalized = normalizeFinanceDataSources(data);
   if (!normalized?.sources?.length) {
-    financeSourceTableList.innerHTML = `<p class="empty-note">暂无财务数据源表</p>`;
+    financeSourceTableList.innerHTML = `<p class="empty-note">${escapeHtml(config.emptySourceText)}</p>`;
     return;
   }
 
@@ -1678,104 +2136,105 @@ function renderFinanceSourceTableList(data = financeData) {
 }
 
 function renderFinanceTable(data) {
-  const columnCount = FINANCE_BILL_FIELDS.length;
-  const colspan = columnCount;
+  const config = getFinanceSubmoduleConfig();
+  const headers = getFinanceDisplayHeaders(data);
+  const colspan = headers.length;
 
   financeTableHead.innerHTML = `<tr>
-    ${FINANCE_BILL_FIELDS.map((field) => `<th>${escapeHtml(field)}</th>`).join("")}
+    ${headers.map((field) => `<th>${escapeHtml(field)}</th>`).join("")}
   </tr>`;
 
   if (!data?.rows?.length) {
-    financeTableBody.innerHTML = `<tr><td colspan="${colspan}" class="empty-cell">上传财务源数据后展示表内容</td></tr>`;
+    financeTableBody.innerHTML = `<tr><td colspan="${colspan}" class="empty-cell">${escapeHtml(config.emptyTableText)}</td></tr>`;
     return;
   }
 
-  const visibleRows = data.rows.slice(0, FINANCE_RENDER_ROW_LIMIT);
-  const limitNote =
-    data.rows.length > visibleRows.length
-      ? `<tr><td colspan="${colspan}" class="finance-limit-note">数据量较大，页面仅展示前 ${formatNumber(
-          visibleRows.length,
-        )} 行，共 ${formatNumber(data.rows.length)} 行；完整数据仍保存在财务数据源表中。</td></tr>`
-      : "";
-
   financeTableBody.innerHTML =
-    visibleRows
-    .map(
+    data.rows
+      .map(
       (row) => `<tr>
-        ${FINANCE_BILL_FIELDS.map((field, index) => {
+        ${headers.map((field, index) => {
           const value = row.record?.[field] ?? row.values?.[index] ?? "";
           return `<td>${escapeHtml(value)}</td>`;
         }).join("")}
       </tr>`,
     )
-      .join("") + limitNote;
+      .join("");
 }
 
-function resetFinanceResult(message = "上传财务源数据后展示表内容") {
-  financeData = null;
-  localStorage.removeItem(FINANCE_DATA_KEY);
+function resetFinanceResult(message, options = {}) {
+  const config = getFinanceSubmoduleConfig();
+  const { clearPersisted = true } = options;
+  const emptyMessage = message || config.emptyTableText;
+  setActiveFinanceData(null);
+  if (clearPersisted) localStorage.removeItem(getFinanceDataKey());
+  updateFinanceSubmoduleLabels();
   financeFileInput.value = "";
   financeFileName.textContent = "未选择文件";
-  financeSheetName.textContent = "-";
-  financeMetaRows.textContent = "0";
-  financeMetaColumns.textContent = "0";
-  financeSourceCount.textContent = "0";
-  financeRowCount.textContent = "0";
-  financeColumnCount.textContent = "0";
+  financeSheetName && (financeSheetName.textContent = "-");
+  financeMetaRows && (financeMetaRows.textContent = "0");
+  financeMetaColumns && (financeMetaColumns.textContent = "0");
   financeWarningText.hidden = true;
   financeWarningText.textContent = "";
   renderFinanceSourceTableList(null);
-  financeTableHead.innerHTML = `<tr>${FINANCE_BILL_FIELDS.map((field) => `<th>${escapeHtml(field)}</th>`).join("")}</tr>`;
-  financeTableBody.innerHTML = `<tr><td colspan="${FINANCE_BILL_FIELDS.length}" class="empty-cell">${escapeHtml(message)}</td></tr>`;
+  renderFinanceTopTotals();
+  renderFinancePersonSummary(null);
+  financeTableHead.innerHTML = `<tr><th>${escapeHtml(config.label)}数据</th></tr>`;
+  financeTableBody.innerHTML = `<tr><td colspan="1" class="empty-cell">${escapeHtml(emptyMessage)}</td></tr>`;
 }
 
 function renderFinanceData(data, options = {}) {
   const { persist = true } = options;
+  const config = getFinanceSubmoduleConfig();
   const normalized = normalizeFinanceDataSources(data);
 
   if (!normalized) {
-    resetFinanceResult();
+    resetFinanceResult(undefined, { clearPersisted: persist });
     return;
   }
 
-  financeData = normalized;
+  setActiveFinanceData(normalized);
+  updateFinanceSubmoduleLabels();
   financeFileName.textContent = formatFinanceFileText(normalized);
-  financeSheetName.textContent =
+  if (financeSheetName) {
+    financeSheetName.textContent =
     normalized.sources.length > 1
-      ? `已读取 ${normalized.sources.length} 个财务数据源表`
+      ? `已读取 ${normalized.sources.length} 个${config.sourceTitle}`
       : normalized.sources[0]?.sheetName || "-";
-  financeMetaRows.textContent = formatNumber(normalized.rowCount);
-  financeMetaColumns.textContent = formatNumber(normalized.columnCount);
-  financeSourceCount.textContent = formatNumber(normalized.sources.length);
-  financeRowCount.textContent = formatNumber(normalized.rowCount);
-  financeColumnCount.textContent = formatNumber(normalized.columnCount);
+  }
+  financeMetaRows && (financeMetaRows.textContent = formatNumber(normalized.rowCount));
+  financeMetaColumns && (financeMetaColumns.textContent = formatNumber(normalized.columnCount));
   financeWarningText.hidden = true;
   financeWarningText.textContent = "";
 
   if (normalized.failedFiles?.length) {
     appendFinanceWarningText(
-      `未读取财务数据源表：${normalized.failedFiles
+      `未读取${config.sourceTitle}：${normalized.failedFiles
         .map((file) => `${file.filename}（${file.message}）`)
         .join("；")}。`,
     );
   }
 
   if (persist) {
-    appendFinanceWarningText(savePersistedFinanceData(normalized));
+    appendFinanceWarningText(savePersistedFinanceData(normalized, activeFinanceSubmodule));
   }
 
   renderFinanceSourceTableList(normalized);
+  renderFinanceTopTotals();
+  renderFinancePersonSummary(normalized);
   renderFinanceTable(normalized);
 }
 
 function deleteFinanceSourceTable(sourceId) {
-  if (!financeData || !sourceId) return;
+  const currentFinanceData = getActiveFinanceData();
+  if (!currentFinanceData || !sourceId) return;
 
-  const normalized = normalizeFinanceDataSources(financeData);
+  const config = getFinanceSubmoduleConfig();
+  const normalized = normalizeFinanceDataSources(currentFinanceData);
   const nextSources = normalized.sources.filter((source) => source.id !== sourceId);
 
   if (!nextSources.length) {
-    resetFinanceResult("已删除全部财务数据源表");
+    resetFinanceResult(config.deletedAllText);
     return;
   }
 
@@ -1788,12 +2247,13 @@ async function uploadFinanceFiles(files) {
   const uploadList = [...(files || [])].filter(Boolean);
   if (!uploadList.length) return;
 
+  const config = getFinanceSubmoduleConfig();
   const previousFileText = financeFileName.textContent;
   financeFileName.textContent =
     uploadList.length === 1
       ? uploadList[0].name
       : `${uploadList.length} 个文件：${uploadList.map((file) => file.name).join("、")}`;
-  setStatus("财务处理中");
+  setStatus(`${config.label}处理中`);
 
   try {
     const parsedTables = [];
@@ -1817,18 +2277,21 @@ async function uploadFinanceFiles(files) {
       throw new Error(
         failedFiles.length
           ? failedFiles.map((file) => `${file.filename}：${file.message}`).join("；")
-          : "没有可读取的财务源数据。",
+          : config.noReadableText,
       );
     }
 
     const appendedData = combineFinanceTables(parsedTables, failedFiles);
-    renderFinanceData(financeData ? mergeFinanceData(financeData, appendedData) : appendedData);
+    const currentFinanceData = getActiveFinanceData();
+    renderFinanceData(
+      currentFinanceData ? mergeFinanceData(currentFinanceData, appendedData) : appendedData,
+    );
     financeFileInput.value = "";
-    setStatus("财务已完成", "ready");
+    setStatus(`${config.label}已完成`, "ready");
   } catch (error) {
-    setStatus("财务处理失败", "error");
+    setStatus(`${config.label}处理失败`, "error");
     financeFileName.textContent = previousFileText;
-    appendFinanceWarningText(`财务源数据读取失败：${error.message}`);
+    appendFinanceWarningText(`${config.readFailedPrefix}：${error.message}`);
   }
 }
 
@@ -3302,6 +3765,12 @@ moduleTabs.forEach((tab) => {
   });
 });
 
+financeSubmoduleTabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    setActiveFinanceSubmodule(tab.dataset.financeSubmoduleTab);
+  });
+});
+
 financeFileInput.addEventListener("change", (event) => {
   uploadFinanceFiles(event.target.files);
 });
@@ -3502,9 +3971,19 @@ if (restoredParsedData) {
 
 const restoredFinanceData = loadPersistedFinanceData();
 if (restoredFinanceData) {
-  renderFinanceData(restoredFinanceData, { persist: false });
+  financeDataByModule.credit = restoredFinanceData;
+}
+
+const restoredInternalFinanceData = loadPersistedFinanceData("internal");
+if (restoredInternalFinanceData) {
+  financeDataByModule.internal = restoredInternalFinanceData;
+}
+
+financeData = getActiveFinanceData();
+if (financeData) {
+  renderFinanceData(financeData, { persist: false });
 } else {
-  resetFinanceResult();
+  resetFinanceResult(undefined, { clearPersisted: false });
 }
 
 const restoredSalesData = loadPersistedSalesData();
