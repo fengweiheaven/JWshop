@@ -185,6 +185,52 @@ h1 {
   box-shadow: var(--shadow-soft);
 }
 
+.finance-store-switcher {
+  grid-column: 1 / -1;
+  padding: 12px;
+  border: 1px solid rgba(198, 208, 201, 0.84);
+  border-radius: 8px;
+  background: rgba(255, 254, 250, 0.82);
+  box-shadow: var(--shadow-soft);
+}
+
+.finance-store-switcher .section-heading {
+  margin-bottom: 10px;
+}
+
+.finance-store-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.finance-store-button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid rgba(198, 208, 201, 0.84);
+  border-radius: 8px;
+  color: var(--muted);
+  background: rgba(255, 254, 250, 0.92);
+  font-size: 14px;
+  font-weight: 900;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease,
+    color 0.16s ease;
+}
+
+.finance-store-button:hover {
+  color: var(--accent-dark);
+  background: rgba(220, 238, 232, 0.48);
+}
+
+.finance-store-button.is-active {
+  border-color: rgba(17, 109, 99, 0.34);
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+}
+
 .finance-submodule-tab {
   min-height: 38px;
   border: 1px solid transparent;
@@ -241,6 +287,30 @@ h1 {
 
 .finance-summary {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.finance-manual-form {
+  display: grid;
+  grid-template-columns: minmax(132px, 0.9fr) repeat(3, minmax(120px, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 254, 250, 0.74);
+}
+
+.finance-manual-form label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.finance-manual-form span {
+  overflow-wrap: anywhere;
+}
+
+.finance-manual-form .secondary-button {
+  min-width: 96px;
 }
 
 .finance-data-table {
@@ -552,6 +622,7 @@ select,
 input[type="text"],
 input[type="search"],
 input[type="number"],
+input[type="date"],
 textarea {
   width: 100%;
   min-height: 40px;
@@ -572,6 +643,7 @@ select:focus,
 input[type="text"]:focus,
 input[type="search"]:focus,
 input[type="number"]:focus,
+input[type="date"]:focus,
 textarea:focus {
   border-color: rgba(17, 109, 99, 0.58);
   background: var(--surface);
@@ -1506,6 +1578,14 @@ tbody tr:hover {
 
   .finance-summary {
     grid-template-columns: 1fr;
+  }
+
+  .finance-manual-form {
+    grid-template-columns: 1fr;
+  }
+
+  .finance-manual-form .secondary-button {
+    width: 100%;
   }
 
   .summary-bar div {

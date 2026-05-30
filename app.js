@@ -41,6 +41,7 @@ const restockMuteCheckbox = document.querySelector("#restockMuteCheckbox");
 const closeRestockButton = document.querySelector("#closeRestockButton");
 const financeFileInput = document.querySelector("#financeFileInput");
 const financeDropZone = document.querySelector("#financeDropZone");
+const financeStoreList = document.querySelector("#financeStoreList");
 const financeSubmoduleTabs = document.querySelectorAll("[data-finance-submodule-tab]");
 const financeFileLabel = document.querySelector("#financeFileLabel");
 const financeFileName = document.querySelector("#financeFileName");
@@ -56,6 +57,14 @@ const financeInternalTotal = document.querySelector("#financeInternalTotal");
 const financePersonSummaryTitle = document.querySelector("#financePersonSummaryTitle");
 const financePersonSummaryHead = document.querySelector("#financePersonSummaryHead");
 const financePersonSummaryBody = document.querySelector("#financePersonSummaryBody");
+const financeManualForm = document.querySelector("#financeManualForm");
+const financeManualDateInput = document.querySelector("#financeManualDateInput");
+const financeManualPersonLabel = document.querySelector("#financeManualPersonLabel");
+const financeManualPersonInput = document.querySelector("#financeManualPersonInput");
+const financeManualAmountLabel = document.querySelector("#financeManualAmountLabel");
+const financeManualAmountInput = document.querySelector("#financeManualAmountInput");
+const financeManualNoteInput = document.querySelector("#financeManualNoteInput");
+const financeManualAddButton = document.querySelector("#financeManualAddButton");
 const financeTableHead = document.querySelector("#financeTableHead");
 const financeTableBody = document.querySelector("#financeTableBody");
 const salesFileInput = document.querySelector("#salesFileInput");
@@ -77,6 +86,9 @@ const STORE_KEY = "inventory-tool-store-settings-v1";
 const DATA_KEY = "inventory-tool-parsed-data-v1";
 const FINANCE_DATA_KEY = "inventory-tool-finance-data-v4";
 const SALES_DATA_KEY = "inventory-tool-sales-data-v1";
+const FINANCE_STORE_SELECTION_KEY = "inventory-tool-finance-selected-store-v1";
+const FINANCE_MANUAL_SOURCE_ID = "finance-manual-entry-source";
+const FINANCE_MANUAL_SOURCE_FILENAME = "手动添加";
 const LEGACY_FINANCE_DATA_KEYS = [
   "inventory-tool-finance-data-v1",
   "inventory-tool-finance-data-v2",
@@ -110,6 +122,8 @@ const FINANCE_SUBMODULES = {
     ],
     fileLabel: "挂账源数据文件",
     sourceTitle: "挂账数据源表",
+    manualAmountLabel: "挂账金额",
+    manualButtonText: "添加挂账",
     emptySourceText: "暂无挂账数据源表",
     emptyTableText: "上传挂账源数据后展示表内容",
     restoredText: "已恢复上次挂账数据",
@@ -139,6 +153,8 @@ const FINANCE_SUBMODULES = {
     ],
     fileLabel: "内部收款源数据文件",
     sourceTitle: "内部收款数据源表",
+    manualAmountLabel: "收款金额",
+    manualButtonText: "添加收款",
     emptySourceText: "暂无内部收款数据源表",
     emptyTableText: "上传内部收款源数据后展示表内容",
     restoredText: "已恢复上次内部收款数据",
@@ -185,6 +201,19 @@ const FINANCE_BILL_FIELDS = [
   "备注",
 ];
 const FINANCE_DATE_FIELDS = new Set(["销售时间", "账单日期"]);
+const FINANCE_DATE_ALIASES = [
+  "销售时间",
+  "账单日期",
+  "日期",
+  "时间",
+  "发生日期",
+  "挂账日期",
+  "收款日期",
+  "付款日期",
+  "创建时间",
+  "录入时间",
+];
+const FINANCE_NOTE_ALIASES = ["备注", "说明", "备注信息", "记录", "附言"];
 
 const fieldLabels = {
   date: "日期",
@@ -259,12 +288,14 @@ const columnAliases = {
 };
 
 let parsedData = null;
+let activeFinanceStoreId = "";
 let activeFinanceSubmodule = "credit";
 let financeData = null;
 let financeDataByModule = {
   credit: null,
   internal: null,
 };
+let financeDataByStore = {};
 let salesData = null;
 let currentSummary = [];
 let editingStoreId = null;
@@ -310,6 +341,11 @@ function setActiveModule(moduleName) {
   modulePanels.forEach((panel) => {
     panel.hidden = panel.dataset.modulePanel !== moduleName;
   });
+
+  if (moduleName === "finance") {
+    ensureActiveFinanceStore();
+    renderFinanceStoreList();
+  }
 }
 
 function getFinanceSubmoduleConfig(moduleName = activeFinanceSubmodule) {
@@ -320,13 +356,115 @@ function getFinanceDataKey(moduleName = activeFinanceSubmodule) {
   return getFinanceSubmoduleConfig(moduleName).dataKey;
 }
 
+function getFinanceStoreDataKey(moduleName = activeFinanceSubmodule, storeId = activeFinanceStoreId) {
+  return `${getFinanceDataKey(moduleName)}::store::${storeId}`;
+}
+
+function getFinanceStoreBucket(storeId = activeFinanceStoreId) {
+  if (!storeId) return { credit: null, internal: null };
+  financeDataByStore[storeId] ||= { credit: null, internal: null };
+  return financeDataByStore[storeId];
+}
+
 function getActiveFinanceData() {
-  return financeDataByModule[activeFinanceSubmodule] || null;
+  return getFinanceStoreBucket()[activeFinanceSubmodule] || null;
 }
 
 function setActiveFinanceData(data) {
-  financeDataByModule[activeFinanceSubmodule] = data;
+  const bucket = getFinanceStoreBucket();
+  bucket[activeFinanceSubmodule] = data;
+  financeDataByModule = bucket;
   financeData = data;
+}
+
+function getFinanceStoreById(storeId = activeFinanceStoreId) {
+  return storeState.stores.find((store) => store.id === storeId) || null;
+}
+
+function getDefaultFinanceStoreId() {
+  const savedStoreId = localStorage.getItem(FINANCE_STORE_SELECTION_KEY) || "";
+  if (getFinanceStoreById(savedStoreId)) return savedStoreId;
+  if (getFinanceStoreById(storeState.selectedStoreId)) return storeState.selectedStoreId;
+  return storeState.stores[0]?.id || "";
+}
+
+function syncActiveFinanceBucket() {
+  financeDataByModule = getFinanceStoreBucket(activeFinanceStoreId);
+  financeData = getActiveFinanceData();
+}
+
+function ensureActiveFinanceStore() {
+  if (getFinanceStoreById(activeFinanceStoreId)) {
+    syncActiveFinanceBucket();
+    return activeFinanceStoreId;
+  }
+
+  activeFinanceStoreId = getDefaultFinanceStoreId();
+  if (activeFinanceStoreId) {
+    localStorage.setItem(FINANCE_STORE_SELECTION_KEY, activeFinanceStoreId);
+  }
+  syncActiveFinanceBucket();
+  return activeFinanceStoreId;
+}
+
+function renderFinanceStoreList() {
+  if (!financeStoreList) return;
+
+  if (!storeState.stores.length) {
+    financeStoreList.innerHTML = `<p class="empty-note">暂无商店</p>`;
+    if (financeFileInput) financeFileInput.disabled = true;
+    return;
+  }
+
+  financeStoreList.innerHTML = storeState.stores
+    .map(
+      (store) => `<button class="finance-store-button ${
+        store.id === activeFinanceStoreId ? "is-active" : ""
+      }" type="button" data-finance-store-id="${escapeHtml(store.id)}">
+        ${escapeHtml(store.name)}
+      </button>`,
+    )
+    .join("");
+  if (financeFileInput) financeFileInput.disabled = !activeFinanceStoreId;
+}
+
+function setActiveFinanceStore(storeId, options = {}) {
+  if (!getFinanceStoreById(storeId)) return;
+
+  activeFinanceStoreId = storeId;
+  localStorage.setItem(FINANCE_STORE_SELECTION_KEY, activeFinanceStoreId);
+  syncActiveFinanceBucket();
+  renderFinanceStoreList();
+
+  if (financeData) {
+    renderFinanceData(financeData, { persist: false });
+  } else {
+    resetFinanceResult(undefined, { clearPersisted: false });
+  }
+}
+
+function removeFinanceStoreData(storeId) {
+  if (!storeId) return;
+
+  Object.keys(FINANCE_SUBMODULES).forEach((moduleName) => {
+    localStorage.removeItem(getFinanceStoreDataKey(moduleName, storeId));
+  });
+  delete financeDataByStore[storeId];
+  if (activeFinanceStoreId === storeId) {
+    activeFinanceStoreId = "";
+    localStorage.removeItem(FINANCE_STORE_SELECTION_KEY);
+  }
+}
+
+function refreshFinanceForStoreChanges() {
+  ensureActiveFinanceStore();
+  renderFinanceStoreList();
+
+  if (financeData) {
+    renderFinanceData(financeData, { persist: false });
+  } else {
+    resetFinanceResult(undefined, { clearPersisted: false });
+  }
 }
 
 function updateFinanceSubmoduleLabels() {
@@ -336,12 +474,39 @@ function updateFinanceSubmoduleLabels() {
   if (financePersonSummaryTitle) {
     financePersonSummaryTitle.textContent = `${config.personLabel}汇总`;
   }
+  if (financeManualPersonLabel) financeManualPersonLabel.textContent = config.personLabel;
+  if (financeManualPersonInput) {
+    financeManualPersonInput.placeholder = `填写${config.personLabel}`;
+  }
+  if (financeManualAmountLabel) {
+    financeManualAmountLabel.textContent = config.manualAmountLabel || config.totalLabel;
+  }
+  if (financeManualAmountInput) {
+    financeManualAmountInput.placeholder = config.manualAmountLabel || config.totalLabel;
+  }
+  if (financeManualAddButton) {
+    financeManualAddButton.textContent = config.manualButtonText || `添加${config.label}`;
+  }
+  if (financeManualDateInput && !financeManualDateInput.value) {
+    financeManualDateInput.value = getTodayDateKey();
+  }
+  const manualInputDisabled = !activeFinanceStoreId;
+  [
+    financeManualDateInput,
+    financeManualPersonInput,
+    financeManualAmountInput,
+    financeManualNoteInput,
+    financeManualAddButton,
+  ].forEach((element) => {
+    if (element) element.disabled = manualInputDisabled;
+  });
 }
 
 function setActiveFinanceSubmodule(moduleName) {
   if (!FINANCE_SUBMODULES[moduleName]) return;
 
   activeFinanceSubmodule = moduleName;
+  ensureActiveFinanceStore();
   financeData = getActiveFinanceData();
   financeSubmoduleTabs.forEach((tab) => {
     const isActive = tab.dataset.financeSubmoduleTab === moduleName;
@@ -1504,20 +1669,36 @@ function buildFinanceHeaders(headerRow, columnCount) {
   });
 }
 
+function getFinanceHeaderKey(header) {
+  return normalizeLabel(header) || String(header || "").trim().toLowerCase();
+}
+
 function mergeFinanceHeaders(sources, columnCount) {
   const prioritizedSources = [...sources].sort((a, b) => {
     const aIsBill = String(a.sheetName || "").trim() === "账单";
     const bIsBill = String(b.sheetName || "").trim() === "账单";
     return Number(bIsBill) - Number(aIsBill);
   });
+  const headers = [];
+  const usedKeys = new Set();
 
-  return Array.from({ length: columnCount }, (_, index) => {
-    for (const source of prioritizedSources) {
+  prioritizedSources.forEach((source) => {
+    const sourceColumnCount = Math.max(columnCount, source.headers?.length || 0);
+    for (let index = 0; index < sourceColumnCount; index += 1) {
       const header = normalizeFinanceCellValue(source.headers?.[index]).trim();
-      if (header) return header;
+      if (!header) continue;
+
+      const key = getFinanceHeaderKey(header);
+      if (key && usedKeys.has(key)) continue;
+
+      headers.push(header);
+      if (key) usedKeys.add(key);
     }
-    return `列 ${index + 1}`;
   });
+
+  if (headers.length) return headers;
+
+  return Array.from({ length: columnCount }, (_, index) => `列 ${index + 1}`);
 }
 
 function normalizeFinanceHeaders(headers, columnCount) {
@@ -1637,28 +1818,106 @@ function findFinanceHeaderRow(rows, moduleName = activeFinanceSubmodule) {
   return best;
 }
 
-function findFinanceColumnIndex(headers, aliases = []) {
+function findFinanceColumnIndexes(headers, aliases = []) {
   const candidates = [];
   headers.forEach((header, index) => {
     const score = aliasScore(header, aliases);
     if (score) candidates.push({ score, index });
   });
 
-  if (!candidates.length) return null;
   candidates.sort((a, b) => b.score - a.score || a.index - b.index);
-  return candidates[0].index;
+  return candidates.map((candidate) => candidate.index);
+}
+
+function findFinanceColumnIndex(headers, aliases = []) {
+  const indexes = findFinanceColumnIndexes(headers, aliases);
+  return indexes[0] ?? null;
+}
+
+function findFinanceDateColumnIndexes(headers = []) {
+  return findFinanceColumnIndexes(headers, FINANCE_DATE_ALIASES).filter((index) =>
+    isFinanceDateHeader(headers[index]),
+  );
+}
+
+function getFinanceRowValueByIndexes(row, headers, indexes = []) {
+  for (const index of indexes) {
+    const value = row.values?.[index] ?? row.record?.[headers[index]];
+    if (normalizeFinanceCellValue(value).trim()) return value;
+  }
+  return "";
+}
+
+function getFinanceRowAmount(row, headers, amountIndexes = []) {
+  let fallback = "";
+
+  for (const index of amountIndexes) {
+    const value = row.values?.[index] ?? row.record?.[headers[index]];
+    const normalized = normalizeFinanceCellValue(value).trim();
+    if (!normalized) continue;
+    const amount = parseFinanceAmount(normalized);
+    if (amount > 0) return amount;
+    if (!fallback) fallback = normalized;
+  }
+
+  return parseFinanceAmount(fallback);
+}
+
+function getFinanceDateSortValue(value) {
+  const normalized = normalizeFinanceCellValue(value).trim();
+  if (!normalized) return null;
+
+  const parsedDate = parseDateValue(normalized);
+  if (parsedDate) {
+    const [year, month, day] = parsedDate.split("-").map(Number);
+    return new Date(year, month - 1, day).getTime();
+  }
+
+  const parsedTime = Date.parse(
+    normalized
+      .replaceAll("年", "-")
+      .replaceAll("月", "-")
+      .replaceAll("日", "")
+      .replace(/[./]/g, "-"),
+  );
+  return Number.isNaN(parsedTime) ? null : parsedTime;
+}
+
+function getFinanceRowDateSortValue(row, headers, dateIndexes = findFinanceDateColumnIndexes(headers)) {
+  for (const index of dateIndexes) {
+    const value = row.values?.[index] ?? row.record?.[headers[index]];
+    const sortValue = getFinanceDateSortValue(value);
+    if (sortValue !== null) return sortValue;
+  }
+  return null;
+}
+
+function sortFinanceRowsByTimeDesc(rows, headers) {
+  const dateIndexes = findFinanceDateColumnIndexes(headers);
+  if (!dateIndexes.length) return rows;
+
+  return rows
+    .map((row, index) => ({
+      row,
+      index,
+      sortValue: getFinanceRowDateSortValue(row, headers, dateIndexes),
+    }))
+    .sort((a, b) => {
+      const aValue = a.sortValue ?? Number.NEGATIVE_INFINITY;
+      const bValue = b.sortValue ?? Number.NEGATIVE_INFINITY;
+      return bValue - aValue || a.index - b.index;
+    })
+    .map((item) => item.row);
 }
 
 function parseFinanceAmount(value) {
   return Math.abs(parseNumber(value, 0));
 }
 
-function financeAmountColumnHasValues(rows, amountIndex, headers = []) {
-  if (amountIndex === null) return false;
-  return rows.some((row) => {
-    const rawValue = row.values?.[amountIndex] ?? row.record?.[headers[amountIndex]];
-    return parseFinanceAmount(rawValue) > 0;
-  });
+function financeAmountColumnHasValues(rows, amountIndexes, headers = []) {
+  const indexes = Array.isArray(amountIndexes) ? amountIndexes : [amountIndexes];
+  if (!indexes.some((index) => index !== null && index !== undefined)) return false;
+  return rows.some((row) => getFinanceRowAmount(row, headers, indexes) > 0);
 }
 
 function getFinanceSummaryContext(data, moduleName = activeFinanceSubmodule) {
@@ -1667,18 +1926,18 @@ function getFinanceSummaryContext(data, moduleName = activeFinanceSubmodule) {
   if (!normalized?.rows?.length) return null;
 
   const directHeaders = getFinanceDisplayHeaders(normalized);
-  const directAmountIndex = findFinanceColumnIndex(directHeaders, config.amountAliases);
-  const directPersonIndex = findFinanceColumnIndex(directHeaders, config.personAliases);
+  const directAmountIndexes = findFinanceColumnIndexes(directHeaders, config.amountAliases);
+  const directPersonIndexes = findFinanceColumnIndexes(directHeaders, config.personAliases);
   if (
-    directAmountIndex !== null &&
-    financeAmountColumnHasValues(normalized.rows, directAmountIndex, directHeaders)
+    directAmountIndexes.length &&
+    financeAmountColumnHasValues(normalized.rows, directAmountIndexes, directHeaders)
   ) {
     return {
       normalized,
       headers: directHeaders,
       rows: normalized.rows,
-      amountIndex: directAmountIndex,
-      personIndex: directPersonIndex,
+      amountIndexes: directAmountIndexes,
+      personIndexes: directPersonIndexes,
     };
   }
 
@@ -1691,8 +1950,8 @@ function getFinanceSummaryContext(data, moduleName = activeFinanceSubmodule) {
       normalized,
       headers: directHeaders,
       rows: normalized.rows,
-      amountIndex: null,
-      personIndex: directPersonIndex,
+      amountIndexes: [],
+      personIndexes: directPersonIndexes,
     };
   }
 
@@ -1700,8 +1959,8 @@ function getFinanceSummaryContext(data, moduleName = activeFinanceSubmodule) {
     normalized,
     headers: headerCandidate.headers,
     rows: normalized.rows.slice(headerCandidate.index + 1),
-    amountIndex: findFinanceColumnIndex(headerCandidate.headers, config.amountAliases),
-    personIndex: findFinanceColumnIndex(headerCandidate.headers, config.personAliases),
+    amountIndexes: findFinanceColumnIndexes(headerCandidate.headers, config.amountAliases),
+    personIndexes: findFinanceColumnIndexes(headerCandidate.headers, config.personAliases),
   };
 }
 
@@ -1712,29 +1971,26 @@ function getFinanceSummary(data, moduleName = activeFinanceSubmodule) {
     return { total: 0, items: [], missingFields: [] };
   }
 
-  const { headers, rows, amountIndex, personIndex } = context;
+  const { headers, rows, amountIndexes = [], personIndexes = [] } = context;
   const missingFields = [];
-  if (amountIndex === null) missingFields.push(config.totalLabel);
-  if (personIndex === null) missingFields.push(config.personLabel);
+  if (!amountIndexes.length) missingFields.push(config.totalLabel);
+  if (!personIndexes.length) missingFields.push(config.personLabel);
 
-  if (amountIndex === null) return { total: 0, items: [], missingFields };
+  if (!amountIndexes.length) return { total: 0, items: [], missingFields };
 
   const total = rows.reduce(
-    (sum, row) =>
-      sum + parseFinanceAmount(row.values?.[amountIndex] ?? row.record?.[headers[amountIndex]]),
+    (sum, row) => sum + getFinanceRowAmount(row, headers, amountIndexes),
     0,
   );
 
-  if (personIndex === null) return { total, items: [], missingFields };
+  if (!personIndexes.length) return { total, items: [], missingFields };
 
   const grouped = new Map();
   rows.forEach((row) => {
     const person =
-      normalizeFinanceCellValue(row.values?.[personIndex] ?? row.record?.[headers[personIndex]])
-        .trim() || `未填写${config.personLabel}`;
-    const amount = parseFinanceAmount(
-      row.values?.[amountIndex] ?? row.record?.[headers[amountIndex]],
-    );
+      normalizeFinanceCellValue(getFinanceRowValueByIndexes(row, headers, personIndexes)).trim() ||
+      `未填写${config.personLabel}`;
+    const amount = getFinanceRowAmount(row, headers, amountIndexes);
     if (!amount) return;
 
     const key = normalizeLabel(person) || person;
@@ -1920,17 +2176,34 @@ function rebuildFinanceDataFromSources(sources, rows, options = {}) {
     ...rows.map((row) => row.values?.length || 0),
   );
   const headers = mergeFinanceHeaders(normalizedSources, columnCount);
+  const headerIndexByKey = new Map(
+    headers.map((header, index) => [getFinanceHeaderKey(header), index]),
+  );
   const sourceById = new Map(normalizedSources.map((source) => [source.id, source]));
   const normalizedRows = rows.map((row) => {
-    const sourceHeaders = sourceById.get(row.sourceId)?.headers || headers;
-    const values = Array.isArray(row.values)
-      ? Array.from({ length: columnCount }, (_, index) =>
-          normalizeFinanceSourceValue(
-            sourceHeaders[index] || headers[index],
-            row.values[index],
-          ),
-        )
-      : buildFinanceValuesFromRecord(headers, row.record);
+    const matchedSource = sourceById.get(row.sourceId);
+    const sourceHeaders = normalizeFinanceHeaders(
+      matchedSource?.headers || headers,
+      Math.max(matchedSource?.headers?.length || 0, row.values?.length || 0, headers.length),
+    );
+    const values = Array.from({ length: headers.length }, () => "");
+
+    if (Array.isArray(row.values)) {
+      row.values.forEach((value, index) => {
+        const sourceHeader = sourceHeaders[index] || headers[index];
+        const targetIndex = headerIndexByKey.get(getFinanceHeaderKey(sourceHeader));
+        if (targetIndex === undefined) return;
+        values[targetIndex] = normalizeFinanceSourceValue(headers[targetIndex], value);
+      });
+    }
+
+    if (row.record && typeof row.record === "object") {
+      Object.entries(row.record).forEach(([header, value]) => {
+        const targetIndex = headerIndexByKey.get(getFinanceHeaderKey(header));
+        if (targetIndex === undefined || values[targetIndex]) return;
+        values[targetIndex] = normalizeFinanceSourceValue(headers[targetIndex], value);
+      });
+    }
 
     return {
       ...row,
@@ -1938,21 +2211,28 @@ function rebuildFinanceDataFromSources(sources, rows, options = {}) {
       values,
     };
   });
+  const sortedRows = sortFinanceRowsByTimeDesc(normalizedRows, headers);
+  const rebuiltSources = normalizedSources.map((source) => ({
+    ...source,
+    rowCount: sortedRows.filter((row) => row.sourceId === source.id).length || source.rowCount || 0,
+    columnCount: headers.length,
+    headers,
+  }));
 
   return {
     filename:
-      normalizedSources.length > 1
-        ? `${normalizedSources.length} 个财务数据源表`
-        : normalizedSources[0]?.filename || "",
+      rebuiltSources.length > 1
+        ? `${rebuiltSources.length} 个财务数据源表`
+        : rebuiltSources[0]?.filename || "",
     sheetName:
-      normalizedSources.length > 1
-        ? `已读取 ${normalizedSources.length} 个财务数据源表`
-        : normalizedSources[0]?.sheetName || "-",
-    rowCount: normalizedRows.length,
-    columnCount,
+      rebuiltSources.length > 1
+        ? `已读取 ${rebuiltSources.length} 个财务数据源表`
+        : rebuiltSources[0]?.sheetName || "-",
+    rowCount: sortedRows.length,
+    columnCount: headers.length,
     headers,
-    rows: normalizedRows,
-    sources: normalizedSources,
+    rows: sortedRows,
+    sources: rebuiltSources,
     failedFiles: options.failedFiles || [],
   };
 }
@@ -2063,10 +2343,33 @@ function mergeFinanceData(existingData, appendedData) {
   );
 }
 
-function loadPersistedFinanceData(moduleName = activeFinanceSubmodule) {
-  const saved = parseJsonFromStorage(getFinanceDataKey(moduleName), null);
+function loadPersistedFinanceData(moduleName = activeFinanceSubmodule, storeId = activeFinanceStoreId) {
+  if (!storeId) return null;
+  const saved = parseJsonFromStorage(getFinanceStoreDataKey(moduleName, storeId), null);
   const normalized = normalizeFinanceDataSources(saved?.data);
   return normalized;
+}
+
+function loadLegacyFinanceData(moduleName = activeFinanceSubmodule) {
+  const saved = parseJsonFromStorage(getFinanceDataKey(moduleName), null);
+  return normalizeFinanceDataSources(saved?.data);
+}
+
+function loadPersistedFinanceStoreData() {
+  financeDataByStore = {};
+
+  storeState.stores.forEach((store) => {
+    const bucket = getFinanceStoreBucket(store.id);
+    bucket.credit = loadPersistedFinanceData("credit", store.id);
+    bucket.internal = loadPersistedFinanceData("internal", store.id);
+  });
+
+  const defaultStoreId = getDefaultFinanceStoreId();
+  if (defaultStoreId) {
+    const bucket = getFinanceStoreBucket(defaultStoreId);
+    bucket.credit ||= loadLegacyFinanceData("credit");
+    bucket.internal ||= loadLegacyFinanceData("internal");
+  }
 }
 
 function clearLegacyFinanceData() {
@@ -2075,12 +2378,17 @@ function clearLegacyFinanceData() {
   });
 }
 
-function savePersistedFinanceData(data, moduleName = activeFinanceSubmodule) {
+function savePersistedFinanceData(
+  data,
+  moduleName = activeFinanceSubmodule,
+  storeId = activeFinanceStoreId,
+) {
   if (!isValidFinanceData(data)) return "";
+  if (!storeId) return "请先选择商店后再上传财务数据。";
 
   try {
     localStorage.setItem(
-      getFinanceDataKey(moduleName),
+      getFinanceStoreDataKey(moduleName, storeId),
       JSON.stringify({
         savedAt: new Date().toISOString(),
         data,
@@ -2162,12 +2470,138 @@ function renderFinanceTable(data) {
       .join("");
 }
 
+function getFinanceManualSourceId(moduleName = activeFinanceSubmodule) {
+  return `${FINANCE_MANUAL_SOURCE_ID}-${moduleName}`;
+}
+
+function getFinanceManualHeaders(moduleName = activeFinanceSubmodule) {
+  const config = getFinanceSubmoduleConfig(moduleName);
+  return ["日期", config.personLabel, config.manualAmountLabel || config.totalLabel, "备注"];
+}
+
+function appendFinanceHeader(headers, header) {
+  const nextHeaders = [...headers];
+  const index = nextHeaders.length;
+  nextHeaders.push(header);
+  return { headers: nextHeaders, index };
+}
+
+function ensureFinanceHeader(headers, aliases, fallbackHeader, predicate = null) {
+  const matchedIndex = findFinanceColumnIndexes(headers, aliases).find((index) =>
+    predicate ? predicate(headers[index]) : true,
+  );
+  if (matchedIndex !== undefined) return { headers, index: matchedIndex };
+  return appendFinanceHeader(headers, fallbackHeader);
+}
+
+function getFinanceManualFieldPlan(sourceHeaders, moduleName = activeFinanceSubmodule) {
+  const config = getFinanceSubmoduleConfig(moduleName);
+  let headers = sourceHeaders?.length
+    ? [...sourceHeaders]
+    : getFinanceManualHeaders(moduleName);
+  let result = ensureFinanceHeader(headers, FINANCE_DATE_ALIASES, "日期", isFinanceDateHeader);
+  headers = result.headers;
+  const dateIndex = result.index;
+
+  result = ensureFinanceHeader(headers, config.personAliases, config.personLabel);
+  headers = result.headers;
+  const personIndex = result.index;
+
+  result = ensureFinanceHeader(
+    headers,
+    config.amountAliases,
+    config.manualAmountLabel || config.totalLabel,
+  );
+  headers = result.headers;
+  const amountIndex = result.index;
+
+  result = ensureFinanceHeader(headers, FINANCE_NOTE_ALIASES, "备注");
+  headers = result.headers;
+
+  return {
+    headers,
+    dateIndex,
+    personIndex,
+    amountIndex,
+    noteIndex: result.index,
+  };
+}
+
+function appendManualFinanceEntry(entry) {
+  const config = getFinanceSubmoduleConfig();
+  const current = normalizeFinanceDataSources(getActiveFinanceData());
+  const manualSourceId = getFinanceManualSourceId();
+  const currentSources = current?.sources || [];
+  const manualSource = currentSources.find((source) => source.id === manualSourceId);
+  const plan = getFinanceManualFieldPlan(manualSource?.headers, activeFinanceSubmodule);
+  const nextSources = currentSources
+    .filter((source) => source.id !== manualSourceId)
+    .concat({
+      ...(manualSource || {}),
+      id: manualSourceId,
+      filename: FINANCE_MANUAL_SOURCE_FILENAME,
+      sheetName: config.label,
+      sheetNames: [config.label],
+      rowCount: 0,
+      columnCount: plan.headers.length,
+      headers: plan.headers,
+    });
+  const values = Array.from({ length: plan.headers.length }, () => "");
+  values[plan.dateIndex] = entry.date;
+  values[plan.personIndex] = entry.person;
+  values[plan.amountIndex] = String(entry.amount);
+  values[plan.noteIndex] = entry.note;
+
+  const rows = current?.rows ? [...current.rows] : [];
+  rows.push({
+    sourceId: manualSourceId,
+    sourceFile: FINANCE_MANUAL_SOURCE_FILENAME,
+    sourceSheet: config.label,
+    sourceRow: Date.now(),
+    manualEntry: true,
+    createdAt: new Date().toISOString(),
+    values,
+    record: buildFinanceRecordFromValues(plan.headers, values),
+  });
+
+  return rebuildFinanceDataFromSources(nextSources, rows);
+}
+
+function handleFinanceManualSubmit(event) {
+  event.preventDefault();
+
+  if (!ensureActiveFinanceStore()) {
+    appendFinanceWarningText("请先创建并选择商店，再添加财务数据。");
+    return;
+  }
+
+  const config = getFinanceSubmoduleConfig();
+  const date = financeManualDateInput?.value || getTodayDateKey();
+  const person = financeManualPersonInput?.value.trim() || "";
+  const amount = parseFinanceAmount(financeManualAmountInput?.value);
+  const note = financeManualNoteInput?.value.trim() || "";
+
+  if (!date || !person || amount <= 0) {
+    appendFinanceWarningText(`请填写日期、${config.personLabel}和有效的${config.manualAmountLabel || config.totalLabel}。`);
+    return;
+  }
+
+  renderFinanceData(appendManualFinanceEntry({ date, person, amount, note }));
+  if (financeManualDateInput) financeManualDateInput.value = getTodayDateKey();
+  if (financeManualPersonInput) financeManualPersonInput.value = "";
+  if (financeManualAmountInput) financeManualAmountInput.value = "";
+  if (financeManualNoteInput) financeManualNoteInput.value = "";
+  setStatus(`${config.label}已添加`, "ready");
+}
+
 function resetFinanceResult(message, options = {}) {
   const config = getFinanceSubmoduleConfig();
   const { clearPersisted = true } = options;
   const emptyMessage = message || config.emptyTableText;
   setActiveFinanceData(null);
-  if (clearPersisted) localStorage.removeItem(getFinanceDataKey());
+  if (clearPersisted && activeFinanceStoreId) {
+    localStorage.removeItem(getFinanceStoreDataKey());
+  }
   updateFinanceSubmoduleLabels();
   financeFileInput.value = "";
   financeFileName.textContent = "未选择文件";
@@ -2216,7 +2650,9 @@ function renderFinanceData(data, options = {}) {
   }
 
   if (persist) {
-    appendFinanceWarningText(savePersistedFinanceData(normalized, activeFinanceSubmodule));
+    appendFinanceWarningText(
+      savePersistedFinanceData(normalized, activeFinanceSubmodule, activeFinanceStoreId),
+    );
   }
 
   renderFinanceSourceTableList(normalized);
@@ -2246,6 +2682,10 @@ function deleteFinanceSourceTable(sourceId) {
 async function uploadFinanceFiles(files) {
   const uploadList = [...(files || [])].filter(Boolean);
   if (!uploadList.length) return;
+  if (!ensureActiveFinanceStore()) {
+    appendFinanceWarningText("请先创建并选择商店，再上传财务数据。");
+    return;
+  }
 
   const config = getFinanceSubmoduleConfig();
   const previousFileText = financeFileName.textContent;
@@ -3318,6 +3758,7 @@ function clearSelectedStore() {
   storeState.selectedStoreId = "";
   saveStoreState();
   renderStoreList();
+  refreshFinanceForStoreChanges();
   renderSummary();
   if (salesData) renderSalesReturnSummary(salesData);
 }
@@ -3534,6 +3975,7 @@ function saveStoreFromEditor() {
   closeStoreEditor();
   saveStoreState();
   renderStoreList();
+  refreshFinanceForStoreChanges();
   renderSummary();
   if (salesData) renderSalesReturnSummary(salesData);
 }
@@ -3564,11 +4006,13 @@ function deleteTargetStore() {
   if (storeState.selectedStoreId === store.id) {
     storeState.selectedStoreId = "";
   }
+  removeFinanceStoreData(store.id);
 
   closeStoreEditor();
   closeDeleteStoreConfirm();
   saveStoreState();
   renderStoreList();
+  refreshFinanceForStoreChanges();
   renderSummary();
 }
 
@@ -3771,6 +4215,13 @@ financeSubmoduleTabs.forEach((tab) => {
   });
 });
 
+financeStoreList?.addEventListener("click", (event) => {
+  const storeButton = event.target.closest("[data-finance-store-id]");
+  if (!storeButton) return;
+
+  setActiveFinanceStore(storeButton.dataset.financeStoreId);
+});
+
 financeFileInput.addEventListener("change", (event) => {
   uploadFinanceFiles(event.target.files);
 });
@@ -3785,6 +4236,8 @@ financeSourceTableList.addEventListener("click", (event) => {
 
   deleteFinanceSourceTable(deleteButton.dataset.deleteFinanceSource);
 });
+
+financeManualForm?.addEventListener("submit", handleFinanceManualSubmit);
 
 salesFileInput.addEventListener("change", (event) => {
   uploadSalesFiles(event.target.files);
@@ -3969,17 +4422,14 @@ if (restoredParsedData) {
   renderStoreList();
 }
 
-const restoredFinanceData = loadPersistedFinanceData();
-if (restoredFinanceData) {
-  financeDataByModule.credit = restoredFinanceData;
+loadPersistedFinanceStoreData();
+activeFinanceStoreId = getDefaultFinanceStoreId();
+if (activeFinanceStoreId) {
+  localStorage.setItem(FINANCE_STORE_SELECTION_KEY, activeFinanceStoreId);
 }
+syncActiveFinanceBucket();
+renderFinanceStoreList();
 
-const restoredInternalFinanceData = loadPersistedFinanceData("internal");
-if (restoredInternalFinanceData) {
-  financeDataByModule.internal = restoredInternalFinanceData;
-}
-
-financeData = getActiveFinanceData();
 if (financeData) {
   renderFinanceData(financeData, { persist: false });
 } else {
