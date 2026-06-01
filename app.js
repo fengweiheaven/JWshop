@@ -685,6 +685,47 @@ function normalizeProductName(value) {
     .toLowerCase();
 }
 
+function stripTrailingPackageSpec(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s*[/／]\s*瓶\s*$/g, "")
+    .replace(/\s*(?:瓶|罐|听|支|个)?\s*[/／]\s*箱\s*$/g, "")
+    .replace(/\s*(?:瓶|罐|听|支|个|箱)\s*$/g, "")
+    .replace(/\s*[*×xX]\s*\d+(?:\.\d+)?\s*$/g, "")
+    .replace(/\s*(?:ml|mL|ML|毫升)\s*$/g, "")
+    .trim();
+}
+
+function normalizeProductBaseName(value) {
+  return normalizeProductName(stripTrailingPackageSpec(value));
+}
+
+function productBaseNameMatches(configuredProduct, actualProduct) {
+  const actualBase = normalizeProductBaseName(actualProduct);
+  if (!actualBase) return false;
+
+  return getProductMatchTokens(configuredProduct).some((token) => {
+    const configuredBase = normalizeProductBaseName(token);
+    return Boolean(configuredBase && configuredBase === actualBase);
+  });
+}
+
+function isBottleRelatedRow(row) {
+  return Boolean(
+    (row.bottleQty || 0) ||
+      (row.outboundBottleQty || 0) ||
+      (row.customerReturnBottleQty || 0) ||
+      (row.surplusReturnBottleQty || 0),
+  );
+}
+
+function productMatchesInventoryRow(product, row) {
+  return (
+    productMatches(product, row.product) ||
+    (isBottleRelatedRow(row) && productBaseNameMatches(product, row.product))
+  );
+}
+
 function isOrderedSubsequence(needle, haystack) {
   if (!needle || !haystack || needle.length > haystack.length) return false;
 
@@ -3485,7 +3526,9 @@ function getFilteredRows(selectedDate) {
 
   return rows
     .map((row) => {
-      const matchedProduct = resolveConfiguredProduct(store, row.product);
+      const matchedProduct =
+        resolveConfiguredProduct(store, row.product) ||
+        store.products.find((product) => productMatchesInventoryRow(product, row));
       return matchedProduct ? { ...row, product: getProductName(matchedProduct) } : null;
     })
     .filter(Boolean);
@@ -3569,7 +3612,7 @@ function getProductInventoryForDate(product, dateKey) {
   if (!parsedData || !dateKey || dateSelect.disabled) return null;
 
   const rows = parsedData.rows.filter(
-    (row) => row.date === dateKey && productMatches(product, row.product),
+    (row) => row.date === dateKey && productMatchesInventoryRow(product, row),
   );
   if (!rows.length) {
     return {
@@ -3846,7 +3889,7 @@ function getProductMovement(product, dateKey) {
   if (!parsedData || !dateKey || dateSelect.disabled) return null;
 
   const rows = parsedData.rows.filter(
-    (row) => row.date === dateKey && productMatches(product, row.product),
+    (row) => row.date === dateKey && productMatchesInventoryRow(product, row),
   );
 
   return rows.reduce(
