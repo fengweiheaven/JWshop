@@ -450,6 +450,21 @@ h1 {
   font-weight: 800;
 }
 
+.change-positive {
+  color: var(--accent-dark);
+  font-weight: 900;
+}
+
+.change-negative {
+  color: var(--danger);
+  font-weight: 900;
+}
+
+.change-neutral {
+  color: var(--muted);
+  font-weight: 800;
+}
+
 .finance-limit-note {
   color: var(--amber);
   background: var(--danger-bg);
@@ -1236,6 +1251,75 @@ select:disabled {
   width: min(520px, 100%);
 }
 
+.data-change-modal {
+  display: grid;
+  gap: 14px;
+  width: min(1180px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  overflow: hidden;
+}
+
+.data-change-table-wrap {
+  max-height: min(62vh, 620px);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.data-change-table {
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
+}
+
+.data-change-table th,
+.data-change-table td {
+  width: auto;
+  min-width: 72px;
+  padding: 9px 10px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.data-change-table th {
+  font-size: 11px;
+}
+
+.data-change-table th:first-child,
+.data-change-table td:first-child {
+  min-width: 92px;
+  max-width: 150px;
+}
+
+.data-change-table th:nth-child(2),
+.data-change-table td:nth-child(2) {
+  min-width: 140px;
+  max-width: 220px;
+  text-align: left;
+}
+
+.data-change-table td:first-child,
+.data-change-table td:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.data-change-table .formula-cell {
+  text-decoration: underline dotted rgba(17, 109, 99, 0.38);
+  text-underline-offset: 3px;
+}
+
+.data-change-table th:nth-child(n + 3),
+.data-change-table td:nth-child(n + 3) {
+  text-align: right;
+}
+
+.data-change-table th:last-child,
+.data-change-table td:last-child {
+  min-width: 72px;
+  text-align: left;
+}
+
 .restock-list {
   display: grid;
   gap: 8px;
@@ -1528,6 +1612,18 @@ td {
   font-variant-numeric: tabular-nums;
 }
 
+tbody td:not(.empty-cell) {
+  cursor: copy;
+  transition:
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+tbody td.is-copied {
+  background: rgba(220, 238, 232, 0.72);
+  box-shadow: inset 0 0 0 1px rgba(17, 109, 99, 0.22);
+}
+
 th {
   position: sticky;
   top: 0;
@@ -1552,6 +1648,42 @@ tbody tr:hover {
   height: 220px;
   color: var(--muted);
   text-align: center;
+}
+
+.copy-toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 40;
+  max-width: min(320px, calc(100vw - 40px));
+  padding: 10px 14px;
+  border: 1px solid rgba(17, 109, 99, 0.2);
+  border-radius: 8px;
+  color: var(--accent-dark);
+  background:
+    linear-gradient(180deg, rgba(255, 254, 250, 0.98), rgba(235, 244, 240, 0.96)),
+    var(--surface);
+  box-shadow: var(--shadow-soft);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.4;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.copy-toast.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.copy-toast.is-error {
+  border-color: rgba(168, 45, 34, 0.24);
+  color: var(--danger);
+  background: var(--danger-bg);
 }
 
 @media (max-width: 900px) {

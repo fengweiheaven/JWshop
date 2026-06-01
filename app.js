@@ -20,6 +20,7 @@ const resultBody = document.querySelector("#resultBody");
 const newStoreButton = document.querySelector("#newStoreButton");
 const allProductsButton = document.querySelector("#allProductsButton");
 const exportInventoryTextButton = document.querySelector("#exportInventoryTextButton");
+const dataChangeButton = document.querySelector("#dataChangeButton");
 const storeList = document.querySelector("#storeList");
 const storeArea = document.querySelector(".store-area");
 const workspace = document.querySelector(".workspace");
@@ -39,6 +40,24 @@ const restockModal = document.querySelector("#restockModal");
 const restockList = document.querySelector("#restockList");
 const restockMuteCheckbox = document.querySelector("#restockMuteCheckbox");
 const closeRestockButton = document.querySelector("#closeRestockButton");
+const dataChangeModal = document.querySelector("#dataChangeModal");
+const dataChangeSubtitle = document.querySelector("#dataChangeSubtitle");
+const dataChangeTableBody = document.querySelector("#dataChangeTableBody");
+const closeDataChangeButton = document.querySelector("#closeDataChangeButton");
+const dataChangeHeaders = {
+  currentTotal: document.querySelector("#dataChangeCurrentTotalHeader"),
+  previousTotal: document.querySelector("#dataChangePreviousTotalHeader"),
+  outboundCase: document.querySelector("#dataChangeOutboundCaseHeader"),
+  outboundBottle: document.querySelector("#dataChangeOutboundBottleHeader"),
+  customerReturnCase: document.querySelector("#dataChangeCustomerReturnCaseHeader"),
+  customerReturnBottle: document.querySelector("#dataChangeCustomerReturnBottleHeader"),
+  surplusReturnCase: document.querySelector("#dataChangeSurplusReturnCaseHeader"),
+  surplusReturnBottle: document.querySelector("#dataChangeSurplusReturnBottleHeader"),
+  currentCase: document.querySelector("#dataChangeCurrentCaseHeader"),
+  currentBottle: document.querySelector("#dataChangeCurrentBottleHeader"),
+  previousCase: document.querySelector("#dataChangePreviousCaseHeader"),
+  previousBottle: document.querySelector("#dataChangePreviousBottleHeader"),
+};
 const financeFileInput = document.querySelector("#financeFileInput");
 const financeDropZone = document.querySelector("#financeDropZone");
 const financeStoreList = document.querySelector("#financeStoreList");
@@ -81,6 +100,8 @@ const salesReturnSummaryText = document.querySelector("#salesReturnSummaryText")
 const salesReturnTableBody = document.querySelector("#salesReturnTableBody");
 const salesTableHead = document.querySelector("#salesTableHead");
 const salesTableBody = document.querySelector("#salesTableBody");
+
+let copyToastTimer = null;
 
 const STORE_KEY = "inventory-tool-store-settings-v1";
 const DATA_KEY = "inventory-tool-parsed-data-v1";
@@ -310,18 +331,101 @@ let suppressStoreClick = false;
 let storeState = loadStoreState();
 
 const numberFormatter = new Intl.NumberFormat("zh-CN", {
+  useGrouping: false,
   maximumFractionDigits: 2,
 });
 
 const moneyFormatter = new Intl.NumberFormat("zh-CN", {
   style: "currency",
   currency: "CNY",
+  useGrouping: false,
   maximumFractionDigits: 2,
 });
 
 function setStatus(text, mode = "") {
   statusPill.textContent = text;
   statusPill.className = `status-pill ${mode}`.trim();
+}
+
+function getCopyToast() {
+  let toast = document.querySelector("#copyToast");
+  if (toast) return toast;
+
+  toast = document.createElement("div");
+  toast.id = "copyToast";
+  toast.className = "copy-toast";
+  toast.setAttribute("role", "status");
+  toast.setAttribute("aria-live", "polite");
+  document.body.appendChild(toast);
+  return toast;
+}
+
+function showCopyToast(text, mode = "success") {
+  const toast = getCopyToast();
+  toast.textContent = text;
+  toast.classList.toggle("is-error", mode === "error");
+  toast.classList.add("is-visible");
+
+  window.clearTimeout(copyToastTimer);
+  copyToastTimer = window.setTimeout(() => {
+    toast.classList.remove("is-visible", "is-error");
+  }, 1400);
+}
+
+function copyTextFallback(text) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  try {
+    return document.execCommand("copy");
+  } finally {
+    textarea.remove();
+  }
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (error) {
+      // Fall through to the legacy copy path for local file usage.
+    }
+  }
+
+  try {
+    return copyTextFallback(text);
+  } catch (error) {
+    return false;
+  }
+}
+
+function getCopyableCellText(cell) {
+  if (!cell || cell.classList.contains("empty-cell")) return "";
+  if (cell.hasAttribute("data-copy-text")) return cell.dataset.copyText.trim();
+
+  return cell.textContent.replace(/\s+/g, " ").trim();
+}
+
+async function copyTableCell(cell) {
+  const text = getCopyableCellText(cell);
+  if (!text) return;
+
+  const copied = await copyTextToClipboard(text);
+  if (!copied) {
+    showCopyToast("复制失败", "error");
+    return;
+  }
+
+  cell.classList.add("is-copied");
+  window.setTimeout(() => cell.classList.remove("is-copied"), 450);
+  showCopyToast(`已复制：${text.length > 18 ? `${text.slice(0, 18)}...` : text}`);
 }
 
 function setRandomHeadline() {
@@ -526,6 +630,15 @@ function setActiveFinanceSubmodule(moduleName) {
 function formatNumber(value) {
   const rounded = Math.abs(value) < 0.0000001 ? 0 : value;
   return numberFormatter.format(rounded);
+}
+
+function formatExportNumber(value) {
+  const rounded = Math.abs(value) < 0.0000001 ? 0 : value;
+  if (!Number.isFinite(rounded)) return String(value ?? "");
+  return rounded.toLocaleString("zh-CN", {
+    useGrouping: false,
+    maximumFractionDigits: 2,
+  });
 }
 
 function formatSignedNumber(value) {
@@ -3330,10 +3443,12 @@ function summarizeRows(rows) {
         changeQty: 0,
         rows: 0,
         boxSizes: new Set(),
+        totalFormulaParts: [],
       });
     }
 
     const item = grouped.get(key);
+    const boxSize = row.boxSize || 1;
     item.caseQty += row.caseQty || 0;
     item.bottleQty += row.bottleQty || 0;
     item.totalQty += row.totalQty || 0;
@@ -3349,7 +3464,12 @@ function summarizeRows(rows) {
     item.surplusReturnBottleQty += row.surplusReturnBottleQty || 0;
     item.changeQty += row.changeQty || 0;
     item.rows += 1;
-    item.boxSizes.add(row.boxSize || 1);
+    item.boxSizes.add(boxSize);
+    item.totalFormulaParts.push({
+      caseQty: row.caseQty || 0,
+      bottleQty: row.bottleQty || 0,
+      boxSize,
+    });
   }
 
   return [...grouped.values()].sort((a, b) =>
@@ -3464,6 +3584,191 @@ function getProductInventoryForDate(product, dateKey) {
 
 function getProductInventory(product) {
   return getProductInventoryForDate(product, dateSelect.value);
+}
+
+function formatDataChangeValue(value) {
+  if (!Number.isFinite(value)) return "-";
+
+  const className =
+    value > 0 ? "change-positive" : value < 0 ? "change-negative" : "change-neutral";
+  return `<span class="${className}">${escapeHtml(formatSignedNumber(value))}</span>`;
+}
+
+function formatFormulaNumber(value) {
+  const normalized = Math.abs(value) < 0.0000001 ? 0 : Number(value);
+  if (!Number.isFinite(normalized)) return "0";
+
+  return normalized.toLocaleString("zh-CN", {
+    useGrouping: false,
+    maximumFractionDigits: 8,
+  });
+}
+
+function buildInventoryTotalFormula(inventory) {
+  if (!inventory) return "";
+
+  const boxSizes = [...(inventory.boxSizes || [])].filter((size) => Number.isFinite(size) && size);
+  if (boxSizes.length <= 1) {
+    return `=${formatFormulaNumber(inventory.caseQty || 0)}+${formatFormulaNumber(
+      inventory.bottleQty || 0,
+    )}/${formatFormulaNumber(boxSizes[0] || 1)}`;
+  }
+
+  const parts = inventory.totalFormulaParts?.length
+    ? inventory.totalFormulaParts
+    : [
+        {
+          caseQty: inventory.caseQty || 0,
+          bottleQty: inventory.bottleQty || 0,
+          boxSize: [...(inventory.boxSizes || [1])][0] || 1,
+        },
+      ];
+
+  return `=${parts
+    .map(
+      (part) =>
+        `${formatFormulaNumber(part.caseQty)}+${formatFormulaNumber(
+          part.bottleQty,
+        )}/${formatFormulaNumber(part.boxSize || 1)}`,
+    )
+    .join("+")}`;
+}
+
+function renderFormulaTotalCell(inventory) {
+  if (!inventory) return "<td>-</td>";
+
+  const formula = buildInventoryTotalFormula(inventory);
+  const title = `总数${formula}`;
+  return `<td class="formula-cell" data-copy-text="${escapeHtml(formula)}" title="${escapeHtml(
+    title,
+  )}">${formatNumber(inventory.totalQty)}</td>`;
+}
+
+function formatShortDateLabel(dateKey, fallback) {
+  if (!dateKey) return fallback;
+
+  const parts = dateKey.split("-");
+  return parts.length === 3 ? `${parts[1]}-${parts[2]}` : dateKey;
+}
+
+function setDataChangeHeaderLabels(selectedDate, previousDate) {
+  const currentLabel = formatShortDateLabel(selectedDate, "当日");
+  const previousLabel = formatShortDateLabel(previousDate, "前日");
+
+  dataChangeHeaders.currentTotal.textContent = `${currentLabel}总库存`;
+  dataChangeHeaders.previousTotal.textContent = `${previousLabel}总库存`;
+  dataChangeHeaders.outboundCase.textContent = `${currentLabel}整件出库`;
+  dataChangeHeaders.outboundBottle.textContent = `${currentLabel}单瓶出库`;
+  dataChangeHeaders.customerReturnCase.textContent = `${currentLabel}客退整件`;
+  dataChangeHeaders.customerReturnBottle.textContent = `${currentLabel}客退单瓶`;
+  dataChangeHeaders.surplusReturnCase.textContent = `${currentLabel}多退整件`;
+  dataChangeHeaders.surplusReturnBottle.textContent = `${currentLabel}多退单瓶`;
+  dataChangeHeaders.currentCase.textContent = `${currentLabel}整件`;
+  dataChangeHeaders.currentBottle.textContent = `${currentLabel}单瓶`;
+  dataChangeHeaders.previousCase.textContent = `${previousLabel}整件`;
+  dataChangeHeaders.previousBottle.textContent = `${previousLabel}单瓶`;
+}
+
+function getDataChangeRows() {
+  if (!parsedData || dateSelect.disabled || !dateSelect.value) {
+    return { rows: [], selectedDate: "", previousDate: "", hasPreviousDate: false };
+  }
+
+  const selectedDate = dateSelect.value;
+  const previousDate = getPreviousDateKey(selectedDate);
+  const hasPreviousDate = parsedData.dates?.includes(previousDate);
+  const rows = [];
+
+  storeState.stores.forEach((store) => {
+    store.products.forEach((product) => {
+      const currentInventory = getProductInventoryForDate(product, selectedDate) || {
+        caseQty: 0,
+        bottleQty: 0,
+        totalQty: 0,
+      };
+      const previousInventory = hasPreviousDate
+        ? getProductInventoryForDate(product, previousDate) || {
+            caseQty: 0,
+            bottleQty: 0,
+            totalQty: 0,
+          }
+        : null;
+      const movement = getProductMovement(product, selectedDate) || {
+        outboundCaseQty: 0,
+        outboundBottleQty: 0,
+        customerReturnCaseQty: 0,
+        customerReturnBottleQty: 0,
+        surplusReturnCaseQty: 0,
+        surplusReturnBottleQty: 0,
+      };
+
+      rows.push({
+        storeName: store.name,
+        productName: getProductName(product),
+        currentInventory,
+        previousInventory,
+        movement,
+        totalChange: previousInventory
+          ? currentInventory.totalQty - previousInventory.totalQty
+          : null,
+        status: hasPreviousDate ? "已对比" : "前日无数据",
+      });
+    });
+  });
+
+  return { rows, selectedDate, previousDate, hasPreviousDate };
+}
+
+function renderDataChangeTable() {
+  const { rows, selectedDate, previousDate, hasPreviousDate } = getDataChangeRows();
+  setDataChangeHeaderLabels(selectedDate, previousDate);
+  dataChangeSubtitle.textContent = selectedDate
+    ? `对比日期：${selectedDate} 比 ${previousDate || "前一日"}${
+        hasPreviousDate ? "" : "（前日无数据）"
+      }`
+    : "对比日期：当日 比 前一日";
+
+  if (!rows.length) {
+    dataChangeTableBody.innerHTML = `<tr><td colspan="16" class="empty-cell">暂无在售商品或库存数据</td></tr>`;
+    return;
+  }
+
+  dataChangeTableBody.innerHTML = rows
+    .map((row) => {
+      const previous = row.previousInventory;
+      const movement = row.movement;
+      return `<tr>
+        <td>${escapeHtml(row.storeName)}</td>
+        <td>${escapeHtml(row.productName)}</td>
+        <td>${previous ? formatDataChangeValue(row.totalChange) : "-"}</td>
+        ${renderFormulaTotalCell(row.currentInventory)}
+        ${renderFormulaTotalCell(previous)}
+        <td>${formatNumber(movement.outboundCaseQty)}</td>
+        <td>${formatNumber(movement.outboundBottleQty)}</td>
+        <td>${formatNumber(movement.customerReturnCaseQty)}</td>
+        <td>${formatNumber(movement.customerReturnBottleQty)}</td>
+        <td>${formatNumber(movement.surplusReturnCaseQty)}</td>
+        <td>${formatNumber(movement.surplusReturnBottleQty)}</td>
+        <td>${formatNumber(row.currentInventory.caseQty)}</td>
+        <td>${formatNumber(row.currentInventory.bottleQty)}</td>
+        <td>${previous ? formatNumber(previous.caseQty) : "-"}</td>
+        <td>${previous ? formatNumber(previous.bottleQty) : "-"}</td>
+        <td><span class="${hasPreviousDate ? "status-ok" : "status-warn"}">${escapeHtml(row.status)}</span></td>
+      </tr>`;
+    })
+    .join("");
+}
+
+function openDataChangeModal() {
+  if (!parsedData || dataChangeButton.disabled) return;
+
+  renderDataChangeTable();
+  dataChangeModal.hidden = false;
+  closeDataChangeButton.focus();
+}
+
+function closeDataChangeModal() {
+  dataChangeModal.hidden = true;
 }
 
 function getRestockMutedUntil() {
@@ -3735,6 +4040,8 @@ function renderStoreList() {
   allProductsButton.classList.toggle("is-active", !storeState.selectedStoreId);
   exportInventoryTextButton.disabled =
     !parsedData || !storeState.stores.some((store) => store.products.length);
+  dataChangeButton.disabled =
+    !parsedData || dateSelect.disabled || !storeState.stores.some((store) => store.products.length);
 
   if (!storeState.stores.length) {
     storeList.innerHTML = `<p class="empty-note">暂无店铺</p>`;
@@ -4078,8 +4385,8 @@ function buildInventoryExportText() {
 
     for (const product of store.products) {
       const inventory = getProductInventory(product);
-      const caseQty = inventory ? formatNumber(inventory.caseQty) : "待上传数据";
-      const bottleQty = inventory ? formatNumber(inventory.bottleQty) : "待上传数据";
+      const caseQty = inventory ? formatExportNumber(inventory.caseQty) : "待上传数据";
+      const bottleQty = inventory ? formatExportNumber(inventory.bottleQty) : "待上传数据";
       const parts = [`${getProductName(product)}：库存整件${caseQty}`];
       if (getProductExportBottle(product)) {
         parts.push(`库存单瓶${bottleQty}`);
@@ -4321,6 +4628,7 @@ dateSelect.addEventListener("change", () => {
 
 newStoreButton.addEventListener("click", () => openStoreEditor());
 exportInventoryTextButton.addEventListener("click", exportInventoryText);
+dataChangeButton.addEventListener("click", openDataChangeModal);
 allProductsButton.addEventListener("click", clearSelectedStore);
 
 storeList.addEventListener("click", (event) => {
@@ -4366,6 +4674,15 @@ document.addEventListener("pointermove", moveStorePointerDrag);
 document.addEventListener("pointerup", finishStorePointerDrag);
 document.addEventListener("pointercancel", finishStorePointerDrag);
 document.addEventListener("click", (event) => {
+  const cell = event.target.closest("tbody td");
+  if (
+    cell &&
+    !event.target.closest("button, input, select, textarea, label, a") &&
+    !cell.classList.contains("empty-cell")
+  ) {
+    copyTableCell(cell);
+  }
+
   if (suppressStoreClick || !storeState.selectedStoreId) return;
   if (isBlankStoreCancelTarget(event.target)) clearSelectedStore();
 });
@@ -4407,7 +4724,15 @@ closeRestockButton.addEventListener("click", closeRestockModal);
 restockModal.addEventListener("click", (event) => {
   if (event.target === restockModal) closeRestockModal();
 });
+closeDataChangeButton.addEventListener("click", closeDataChangeModal);
+dataChangeModal.addEventListener("click", (event) => {
+  if (event.target === dataChangeModal) closeDataChangeModal();
+});
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !dataChangeModal.hidden) {
+    closeDataChangeModal();
+    return;
+  }
   if (event.key === "Escape" && !restockModal.hidden) {
     closeRestockModal();
     return;
