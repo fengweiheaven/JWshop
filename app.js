@@ -3579,7 +3579,9 @@ function getProductInventoryForDate(product, dateKey) {
     };
   }
 
-  return summarizeRows(rows)[0];
+  const productName = getProductName(product);
+  const matchedRows = rows.map((row) => ({ ...row, product: productName }));
+  return summarizeRows(matchedRows)[0];
 }
 
 function getProductInventory(product) {
@@ -4471,7 +4473,10 @@ function renderParsedData(data, options = {}) {
         })
         .join("、")}`
     : "出库/退货列：未识别";
-  columnMatch.textContent = `${baseColumnText}；${movementColumnText}`;
+  const multiSourceRuleText = isMultiSource
+    ? "；多表规则：按处理日期读取所有数据源，商品名匹配后合并统计"
+    : "";
+  columnMatch.textContent = `${baseColumnText}；${movementColumnText}${multiSourceRuleText}`;
 
   warningText.hidden = true;
   warningText.textContent = "";
@@ -4548,9 +4553,7 @@ async function uploadFiles(files) {
 
     const appendedData = combineParsedTables(parsedTables, failedFiles);
     const nextData = parsedData ? mergeParsedData(parsedData, appendedData) : appendedData;
-    renderParsedData(nextData, {
-      selectedDate: dateSelect.value,
-    });
+    renderParsedData(nextData);
     fileInput.value = "";
   } catch (error) {
     setStatus("处理失败", "error");
