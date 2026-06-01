@@ -633,6 +633,27 @@ function getProductPrice(product) {
   return parseUnitPrice(product.price);
 }
 
+function hasProductExportBottleSetting(product) {
+  if (!product || typeof product === "string") return false;
+  return ["exportBottle", "exportSingleBottle", "includeBottleInExport"].some((key) =>
+    Object.prototype.hasOwnProperty.call(product, key),
+  );
+}
+
+function getProductExportBottle(product) {
+  if (!product || typeof product === "string") return true;
+  if (Object.prototype.hasOwnProperty.call(product, "exportBottle")) {
+    return product.exportBottle !== false;
+  }
+  if (Object.prototype.hasOwnProperty.call(product, "exportSingleBottle")) {
+    return product.exportSingleBottle !== false;
+  }
+  if (Object.prototype.hasOwnProperty.call(product, "includeBottleInExport")) {
+    return product.includeBottleInExport !== false;
+  }
+  return true;
+}
+
 function parseProductKeywords(value) {
   const rawItems = Array.isArray(value)
     ? value
@@ -678,11 +699,15 @@ function normalizeProductEntries(products) {
     const price = getProductPrice(product);
     const keywords = getProductKeywords(product);
     const existing = productsByKey.get(key);
+    const exportBottle = hasProductExportBottleSetting(product)
+      ? getProductExportBottle(product)
+      : (existing?.exportBottle ?? true);
 
     productsByKey.set(key, {
       name: existing?.name || name,
       price: price ?? existing?.price ?? null,
       keywords: mergeProductKeywords(existing?.keywords || [], keywords),
+      exportBottle,
     });
   }
 
@@ -3653,6 +3678,15 @@ function formatReturnText(product) {
   )}，多货退货单瓶 ${formatNumber(movement.surplusReturnBottleQty)}`;
 }
 
+function setProductExportBottle(storeId, productIndex, exportBottle) {
+  const store = getStoreById(storeId);
+  const product = store?.products?.[productIndex];
+  if (!product) return;
+
+  product.exportBottle = exportBottle;
+  saveStoreState();
+}
+
 function renderStoreProducts(store) {
   if (!store.products.length) {
     return `<p class="empty-note">暂无在售商品</p>`;
@@ -3660,13 +3694,24 @@ function renderStoreProducts(store) {
 
   return store.products
     .map(
-      (product) => {
+      (product, productIndex) => {
         const keywordText = formatProductKeywordsText(product);
+        const exportBottle = getProductExportBottle(product);
         return `<div class="store-product-row">
         <span class="product-name-cell">
           <strong>${escapeHtml(getProductName(product))}</strong>
           ${keywordText ? `<em>${escapeHtml(keywordText)}</em>` : ""}
         </span>
+        <label class="store-product-export-toggle" title="控制一键导出库存时是否包含该商品的单瓶数量">
+          <input
+            type="checkbox"
+            data-store-product-export-bottle
+            data-store-id="${escapeHtml(store.id)}"
+            data-product-index="${productIndex}"
+            ${exportBottle ? "checked" : ""}
+          />
+          <span>导出单瓶</span>
+        </label>
         <small>${escapeHtml(formatPriceText(product))}</small>
         <small>${formatInventoryHtml(product)}</small>
         <small>${escapeHtml(formatInventoryValueText(product))}</small>
@@ -3778,7 +3823,7 @@ function getStoreDragCard(event) {
 
   if (event.target.closest("[data-edit-store]")) return null;
   if (event.target.closest(".store-drag-handle")) return storeCard;
-  if (event.target.closest("button, input, select, textarea, a")) return null;
+  if (event.target.closest("button, input, select, textarea, a, label")) return null;
 
   return storeCard;
 }
@@ -3862,10 +3907,11 @@ function finishStorePointerDrag(event) {
   }
 }
 
-function renderProductEditorRow(product = { name: "", price: null }) {
+function renderProductEditorRow(product = { name: "", price: null, exportBottle: true }) {
   const price = getProductPrice(product);
   const keywords = getProductKeywords(product).join("，");
   const productName = getProductName(product);
+  const exportBottle = getProductExportBottle(product);
 
   return `<div class="product-editor-row">
     <div class="product-editor-main">
@@ -3894,15 +3940,19 @@ function renderProductEditorRow(product = { name: "", price: null }) {
       placeholder="匹配关键词/别名，用逗号分隔"
       value="${escapeHtml(keywords)}"
     />
+    <label class="product-export-bottle-toggle">
+      <input type="checkbox" data-product-export-bottle-input ${exportBottle ? "checked" : ""} />
+      <span>是否导出单瓶</span>
+    </label>
   </div>`;
 }
 
 function renderProductEditorRows(products = []) {
-  const rows = products.length ? products : [{ name: "", price: null }];
+  const rows = products.length ? products : [{ name: "", price: null, exportBottle: true }];
   storeProductRows.innerHTML = rows.map((product) => renderProductEditorRow(product)).join("");
 }
 
-function addProductEditorRow(product = { name: "", price: null }) {
+function addProductEditorRow(product = { name: "", price: null, exportBottle: true }) {
   storeProductRows.insertAdjacentHTML("beforeend", renderProductEditorRow(product));
   const nameInputs = storeProductRows.querySelectorAll("[data-product-name-input]");
   nameInputs[nameInputs.length - 1]?.focus();
@@ -3915,6 +3965,7 @@ function getProductEditorProducts() {
       name: row.querySelector("[data-product-name-input]")?.value || "",
       price: row.querySelector("[data-product-price-input]")?.value || "",
       keywords: row.querySelector("[data-product-keywords-input]")?.value || "",
+      exportBottle: row.querySelector("[data-product-export-bottle-input]")?.checked !== false,
     })),
   );
 }
@@ -4029,7 +4080,11 @@ function buildInventoryExportText() {
       const inventory = getProductInventory(product);
       const caseQty = inventory ? formatNumber(inventory.caseQty) : "待上传数据";
       const bottleQty = inventory ? formatNumber(inventory.bottleQty) : "待上传数据";
-      lines.push(`${getProductName(product)}：库存整件${caseQty}，库存单瓶${bottleQty}`);
+      const parts = [`${getProductName(product)}：库存整件${caseQty}`];
+      if (getProductExportBottle(product)) {
+        parts.push(`库存单瓶${bottleQty}`);
+      }
+      lines.push(parts.join("，"));
     }
   }
 
@@ -4281,6 +4336,10 @@ storeList.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-store-product-export-bottle], .store-product-export-toggle")) {
+    return;
+  }
+
   const selectButton = event.target.closest("[data-select-store]");
   const storeCard = event.target.closest("[data-store-id]");
   const storeId = selectButton?.dataset.selectStore || storeCard?.dataset.storeId;
@@ -4290,6 +4349,16 @@ storeList.addEventListener("click", (event) => {
   saveStoreState();
   renderStoreList();
   renderSummary();
+});
+
+storeList.addEventListener("change", (event) => {
+  const checkbox = event.target.closest("[data-store-product-export-bottle]");
+  if (!checkbox) return;
+
+  const productIndex = Number(checkbox.dataset.productIndex);
+  if (!Number.isInteger(productIndex)) return;
+
+  setProductExportBottle(checkbox.dataset.storeId, productIndex, checkbox.checked);
 });
 
 storeList.addEventListener("pointerdown", startStorePointerDrag);

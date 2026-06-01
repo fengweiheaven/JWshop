@@ -97,7 +97,7 @@ h1 {
   font-family:
     "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Helvetica Neue",
     Arial, sans-serif;
-  font-size: 26px;
+  font-size: 13px;
   line-height: 1.28;
   font-weight: 800;
 }
@@ -1069,6 +1069,7 @@ select:disabled {
 }
 
 .store-product-row {
+  position: relative;
   display: grid;
   gap: 3px;
   padding: 8px;
@@ -1081,6 +1082,7 @@ select:disabled {
 .store-home-panel .store-product-row {
   gap: 6px;
   padding: 14px;
+  padding-top: 24px;
 }
 
 .store-product-row span {
@@ -1098,6 +1100,7 @@ select:disabled {
 .store-product-row .product-name-cell {
   display: grid;
   gap: 2px;
+  padding-right: 92px;
 }
 
 .store-product-row .product-name-cell em {
@@ -1109,6 +1112,48 @@ select:disabled {
 
 .store-home-panel .store-product-row .product-name-cell em {
   font-size: 12px;
+}
+
+.store-product-export-toggle {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  width: fit-content;
+  min-height: 14px;
+  padding: 1px 4px;
+  border: 1px solid rgba(17, 109, 99, 0.2);
+  border-radius: 999px;
+  color: var(--accent-dark);
+  background: rgba(220, 238, 232, 0.48);
+  font-size: 6px;
+  line-height: 1;
+  font-weight: 800;
+  cursor: pointer;
+  user-select: none;
+}
+
+.store-product-export-toggle input {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.store-home-panel .store-product-row .store-product-export-toggle span,
+.store-product-row .store-product-export-toggle span {
+  font-size: 6px;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.store-product-export-toggle:has(input:not(:checked)) {
+  border-color: rgba(100, 113, 110, 0.2);
+  color: var(--muted);
+  background: rgba(245, 246, 242, 0.8);
 }
 
 .store-product-row small {
@@ -1124,7 +1169,7 @@ select:disabled {
 }
 
 .store-home-panel .store-product-row small {
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .empty-note {
@@ -1300,6 +1345,24 @@ select:disabled {
 
 .product-keywords-input {
   width: 100%;
+}
+
+.product-export-bottle-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.product-export-bottle-toggle input {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  accent-color: var(--accent);
 }
 
 .row-remove-button {
@@ -1503,10 +1566,6 @@ tbody tr:hover {
     padding: 16px;
   }
 
-  h1 {
-    font-size: 23px;
-  }
-
   .workspace {
     grid-template-columns: 1fr;
   }
@@ -1570,6 +1629,7 @@ tbody tr:hover {
 
   .store-home-panel .store-product-row {
     padding: 12px;
+    padding-top: 24px;
   }
 
   .summary-bar {

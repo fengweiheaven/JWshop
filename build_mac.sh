@@ -12,6 +12,9 @@ python3 -m PyInstaller \
   --add-data "app.js:." \
   --add-data "styles.css:." \
   --add-data "sample_inventory.csv:." \
+  --add-data "vendor:vendor" \
+  --add-data "demo-data:demo-data" \
+  --add-data "source-data:source-data" \
   server.py
 
 echo

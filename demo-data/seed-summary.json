@@ -1,0 +1,68 @@
+{
+  "keys": [
+    "inventory-tool-parsed-data-v1",
+    "inventory-tool-restock-muted-until-v1",
+    "inventory-tool-sales-data-v1",
+    "inventory-tool-store-settings-backup-v1",
+    "inventory-tool-finance-internal-collection-data-v1",
+    "inventory-tool-finance-data-v4::store::store-1780065182350-8fa7aea899d268",
+    "inventory-tool-store-settings-v1",
+    "inventory-tool-finance-selected-store-v1",
+    "inventory-tool-finance-data-v4"
+  ],
+  "summary": {
+    "inventory-tool-parsed-data-v1": {
+      "savedAt": "2026-05-29T14:36:26.044Z",
+      "rowCount": 2318,
+      "storeCount": null
+    },
+    "inventory-tool-restock-muted-until-v1": {
+      "savedAt": "",
+      "rowCount": null,
+      "storeCount": null
+    },
+    "inventory-tool-sales-data-v1": {
+      "savedAt": "2026-05-29T14:45:46.723Z",
+      "rowCount": 4,
+      "storeCount": null
+    },
+    "inventory-tool-store-settings-backup-v1": {
+      "savedAt": "",
+      "rowCount": null,
+      "storeCount": 8
+    },
+    "inventory-tool-finance-internal-collection-data-v1": {
+      "savedAt": "2026-05-29T15:49:18.482Z",
+      "rowCount": 88,
+      "storeCount": null
+    },
+    "inventory-tool-finance-data-v4::store::store-1780065182350-8fa7aea899d268": {
+      "savedAt": "2026-05-30T02:35:44.169Z",
+      "rowCount": 189,
+      "storeCount": null
+    },
+    "inventory-tool-store-settings-v1": {
+      "savedAt": "",
+      "rowCount": null,
+      "storeCount": 8
+    },
+    "inventory-tool-finance-selected-store-v1": {
+      "value": "store-1780065182350-8fa7aea899d268"
+    },
+    "inventory-tool-finance-data-v4": {
+      "savedAt": "2026-05-29T15:46:04.915Z",
+      "rowCount": 189,
+      "storeCount": null
+    }
+  },
+  "referencedFilenames": [
+    "玺易澄苏打水5月出库 (27).xlsx",
+    "afterSale-2026-05-28-1780025898165.csv",
+    "宇生方 款往来账目.xlsx"
+  ],
+  "foundSourceFiles": [
+    "C:\\Users\\admin\\Desktop\\玺易澄苏打水5月出库 (27).xlsx",
+    "C:\\Users\\admin\\Desktop\\afterSale-2026-05-28-1780025898165.csv",
+    "C:\\Users\\admin\\Desktop\\宇生方 款往来账目.xlsx"
+  ]
+}
