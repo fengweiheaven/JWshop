@@ -20,6 +20,7 @@ const resultBody = document.querySelector("#resultBody");
 const newStoreButton = document.querySelector("#newStoreButton");
 const allProductsButton = document.querySelector("#allProductsButton");
 const exportInventoryTextButton = document.querySelector("#exportInventoryTextButton");
+const exportDeliveryTextButton = document.querySelector("#exportDeliveryTextButton");
 const dataChangeButton = document.querySelector("#dataChangeButton");
 const storeList = document.querySelector("#storeList");
 const storeArea = document.querySelector(".store-area");
@@ -3867,6 +3868,27 @@ function formatShortDateLabel(dateKey, fallback) {
   return parts.length === 3 ? `${parts[1]}-${parts[2]}` : dateKey;
 }
 
+function formatDeliveryDateLabel(dateKey) {
+  const parts = String(dateKey || "").split("-");
+  if (parts.length !== 3) return dateKey || "";
+
+  const month = Number(parts[1]);
+  const day = Number(parts[2]);
+  if (!month || !day) return dateKey;
+  return `${month}月${day}日`;
+}
+
+function buildDeliveryDateRangeText(dates) {
+  const validDates = [...new Set(dates || [])].filter(Boolean).sort();
+  if (!validDates.length) return "暂无日期";
+
+  const startDate = validDates[0];
+  const endDate = validDates[validDates.length - 1];
+  return startDate === endDate
+    ? formatDeliveryDateLabel(startDate)
+    : `${formatDeliveryDateLabel(startDate)}-${formatDeliveryDateLabel(endDate)}`;
+}
+
 function setDataChangeHeaderLabels(selectedDate, previousDate) {
   const currentLabel = formatShortDateLabel(selectedDate, "当日");
   const previousLabel = formatShortDateLabel(previousDate, "前日");
@@ -4295,6 +4317,8 @@ function renderStoreList() {
   allProductsButton.classList.toggle("is-active", !storeState.selectedStoreId);
   exportInventoryTextButton.disabled =
     !parsedData || !storeState.stores.some((store) => store.products.length);
+  exportDeliveryTextButton.disabled =
+    !parsedData || dateSelect.disabled || !parsedData.rows?.length;
   dataChangeButton.disabled =
     !parsedData || dateSelect.disabled || !storeState.stores.some((store) => store.products.length);
 
@@ -4670,6 +4694,77 @@ function exportInventoryText() {
   URL.revokeObjectURL(url);
 }
 
+function getDeliveryExportProductName(sourceProduct) {
+  const matchedProduct = resolveConfiguredProductFromProducts(
+    getAllConfiguredProducts(),
+    sourceProduct,
+  );
+  return matchedProduct ? getProductName(matchedProduct) : String(sourceProduct || "").trim();
+}
+
+function buildDeliveryExportText() {
+  if (!parsedData) return "";
+
+  const grouped = new Map();
+  const dateRangeText = buildDeliveryDateRangeText(parsedData.dates);
+
+  for (const row of parsedData.rows || []) {
+    const caseQty = Number(row.outboundCaseQty) || 0;
+    const bottleQty = Number(row.outboundBottleQty) || 0;
+    if (Math.abs(caseQty) < 0.0000001 && Math.abs(bottleQty) < 0.0000001) continue;
+
+    const productName = getDeliveryExportProductName(row.product);
+    if (!productName) continue;
+
+    const key = normalizeProductName(productName) || productName;
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        productName,
+        caseQty: 0,
+        bottleQty: 0,
+      });
+    }
+
+    const item = grouped.get(key);
+    item.caseQty += caseQty;
+    item.bottleQty += bottleQty;
+  }
+
+  const lines = [dateRangeText];
+  const items = [...grouped.values()].sort((a, b) =>
+    a.productName.localeCompare(b.productName, "zh-Hans-CN"),
+  );
+
+  if (!items.length) {
+    lines.push("暂无出库数据");
+  } else {
+    items.forEach((item) => {
+      lines.push(
+        `${item.productName}共出库：整件${formatExportNumber(
+          item.caseQty,
+        )}，单瓶${formatExportNumber(item.bottleQty)}`,
+      );
+    });
+  }
+
+  return lines.join("\n") + "\n";
+}
+
+function exportDeliveryText() {
+  if (!parsedData || exportDeliveryTextButton.disabled) return;
+
+  const text = "\ufeff" + buildDeliveryExportText();
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const safeDateRange = buildDeliveryDateRangeText(parsedData.dates).replace(/[\\/:*?"<>|]/g, "_");
+
+  link.href = url;
+  link.download = `送货量_${safeDateRange}.txt`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function renderParsedData(data, options = {}) {
   const {
     persist = true,
@@ -4886,6 +4981,7 @@ dateSelect.addEventListener("change", () => {
 
 newStoreButton.addEventListener("click", () => openStoreEditor());
 exportInventoryTextButton.addEventListener("click", exportInventoryText);
+exportDeliveryTextButton.addEventListener("click", exportDeliveryText);
 dataChangeButton.addEventListener("click", openDataChangeModal);
 dataChangeStoreTabs?.addEventListener("click", (event) => {
   const tab = event.target.closest("[data-data-change-store-id]");
