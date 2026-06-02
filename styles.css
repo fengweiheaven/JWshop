@@ -1338,6 +1338,11 @@ select:disabled {
   text-underline-offset: 3px;
 }
 
+.data-change-table .return-value {
+  color: var(--danger);
+  font-weight: 900;
+}
+
 .data-change-table th:nth-child(n + 3),
 .data-change-table td:nth-child(n + 3) {
   text-align: right;

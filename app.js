@@ -3804,6 +3804,12 @@ function formatDataChangeValue(value) {
   return `<span class="${className}">${escapeHtml(formatSignedNumber(value))}</span>`;
 }
 
+function renderReturnValueCell(value) {
+  const numericValue = Number(value) || 0;
+  const className = Math.abs(numericValue) > 0.0000001 ? ' class="return-value"' : "";
+  return `<td${className}>${formatNumber(value)}</td>`;
+}
+
 function formatFormulaNumber(value) {
   const normalized = Math.abs(value) < 0.0000001 ? 0 : Number(value);
   if (!Number.isFinite(normalized)) return "0";
@@ -3994,10 +4000,10 @@ function renderDataChangeTable() {
         ${renderFormulaTotalCell(previous)}
         <td>${formatNumber(movement.outboundCaseQty)}</td>
         <td>${formatNumber(movement.outboundBottleQty)}</td>
-        <td>${formatNumber(movement.customerReturnCaseQty)}</td>
-        <td>${formatNumber(movement.customerReturnBottleQty)}</td>
-        <td>${formatNumber(movement.surplusReturnCaseQty)}</td>
-        <td>${formatNumber(movement.surplusReturnBottleQty)}</td>
+        ${renderReturnValueCell(movement.customerReturnCaseQty)}
+        ${renderReturnValueCell(movement.customerReturnBottleQty)}
+        ${renderReturnValueCell(movement.surplusReturnCaseQty)}
+        ${renderReturnValueCell(movement.surplusReturnBottleQty)}
         <td>${formatNumber(row.currentInventory.caseQty)}</td>
         <td>${formatNumber(row.currentInventory.bottleQty)}</td>
         <td>${previous ? formatNumber(previous.caseQty) : "-"}</td>
@@ -4624,13 +4630,15 @@ function deleteTargetStore() {
 }
 
 function buildInventoryExportText() {
-  const lines = [];
+  const lines = ["库存报备："];
+  let hasWrittenStore = false;
 
   for (const store of storeState.stores) {
     if (!store.products.length) continue;
 
-    if (lines.length) lines.push("");
+    if (hasWrittenStore) lines.push("");
     lines.push(store.name);
+    hasWrittenStore = true;
 
     for (const product of store.products) {
       const inventory = getProductInventory(product);
