@@ -1259,6 +1259,35 @@ select:disabled {
   overflow: hidden;
 }
 
+.data-change-store-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(198, 208, 201, 0.72);
+  border-radius: 8px;
+  background: rgba(246, 248, 244, 0.82);
+}
+
+.data-change-store-tabs button {
+  min-height: 32px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.data-change-store-tabs button:hover,
+.data-change-store-tabs button.is-active {
+  border-color: rgba(17, 109, 99, 0.32);
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+}
+
 .data-change-table-wrap {
   max-height: min(62vh, 620px);
   border: 1px solid var(--line);

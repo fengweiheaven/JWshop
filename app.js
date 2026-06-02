@@ -42,6 +42,7 @@ const restockMuteCheckbox = document.querySelector("#restockMuteCheckbox");
 const closeRestockButton = document.querySelector("#closeRestockButton");
 const dataChangeModal = document.querySelector("#dataChangeModal");
 const dataChangeSubtitle = document.querySelector("#dataChangeSubtitle");
+const dataChangeStoreTabs = document.querySelector("#dataChangeStoreTabs");
 const dataChangeTableBody = document.querySelector("#dataChangeTableBody");
 const closeDataChangeButton = document.querySelector("#closeDataChangeButton");
 const dataChangeHeaders = {
@@ -102,6 +103,7 @@ const salesTableHead = document.querySelector("#salesTableHead");
 const salesTableBody = document.querySelector("#salesTableBody");
 
 let copyToastTimer = null;
+let activeDataChangeStoreId = "all";
 
 const STORE_KEY = "inventory-tool-store-settings-v1";
 const DATA_KEY = "inventory-tool-parsed-data-v1";
@@ -3714,7 +3716,37 @@ function setDataChangeHeaderLabels(selectedDate, previousDate) {
   dataChangeHeaders.previousBottle.textContent = `${previousLabel}单瓶`;
 }
 
-function getDataChangeRows() {
+function getValidDataChangeStoreId(storeId = activeDataChangeStoreId) {
+  if (storeId === "all") return "all";
+  return storeState.stores.some((store) => store.id === storeId) ? storeId : "all";
+}
+
+function getDataChangeScopeText(storeId = activeDataChangeStoreId) {
+  if (storeId === "all") return "全部店铺";
+  return getStoreById(storeId)?.name || "当前店铺";
+}
+
+function renderDataChangeStoreTabs() {
+  if (!dataChangeStoreTabs) return;
+
+  activeDataChangeStoreId = getValidDataChangeStoreId();
+  const tabs = [
+    { id: "all", name: "全部" },
+    ...storeState.stores.map((store) => ({ id: store.id, name: store.name || "未命名店铺" })),
+  ];
+
+  dataChangeStoreTabs.innerHTML = tabs
+    .map(
+      (tab) => `<button
+        class="${tab.id === activeDataChangeStoreId ? "is-active" : ""}"
+        type="button"
+        data-data-change-store-id="${escapeHtml(tab.id)}"
+      >${escapeHtml(tab.name)}</button>`,
+    )
+    .join("");
+}
+
+function getDataChangeRows(storeId = "all") {
   if (!parsedData || dateSelect.disabled || !dateSelect.value) {
     return { rows: [], selectedDate: "", previousDate: "", hasPreviousDate: false };
   }
@@ -3723,8 +3755,12 @@ function getDataChangeRows() {
   const previousDate = getPreviousDateKey(selectedDate);
   const hasPreviousDate = parsedData.dates?.includes(previousDate);
   const rows = [];
+  const stores =
+    storeId === "all"
+      ? storeState.stores
+      : storeState.stores.filter((store) => store.id === storeId);
 
-  storeState.stores.forEach((store) => {
+  stores.forEach((store) => {
     store.products.forEach((product) => {
       const currentInventory = getProductInventoryForDate(product, selectedDate) || {
         caseQty: 0,
@@ -3765,13 +3801,18 @@ function getDataChangeRows() {
 }
 
 function renderDataChangeTable() {
-  const { rows, selectedDate, previousDate, hasPreviousDate } = getDataChangeRows();
+  activeDataChangeStoreId = getValidDataChangeStoreId();
+  renderDataChangeStoreTabs();
+
+  const { rows, selectedDate, previousDate, hasPreviousDate } =
+    getDataChangeRows(activeDataChangeStoreId);
+  const scopeText = getDataChangeScopeText(activeDataChangeStoreId);
   setDataChangeHeaderLabels(selectedDate, previousDate);
   dataChangeSubtitle.textContent = selectedDate
-    ? `对比日期：${selectedDate} 比 ${previousDate || "前一日"}${
+    ? `对比日期：${selectedDate} 比 ${previousDate || "前一日"}；范围：${scopeText}${
         hasPreviousDate ? "" : "（前日无数据）"
       }`
-    : "对比日期：当日 比 前一日";
+    : `对比日期：当日 比 前一日；范围：${scopeText}`;
 
   if (!rows.length) {
     dataChangeTableBody.innerHTML = `<tr><td colspan="16" class="empty-cell">暂无在售商品或库存数据</td></tr>`;
@@ -4675,6 +4716,13 @@ dateSelect.addEventListener("change", () => {
 newStoreButton.addEventListener("click", () => openStoreEditor());
 exportInventoryTextButton.addEventListener("click", exportInventoryText);
 dataChangeButton.addEventListener("click", openDataChangeModal);
+dataChangeStoreTabs?.addEventListener("click", (event) => {
+  const tab = event.target.closest("[data-data-change-store-id]");
+  if (!tab) return;
+
+  activeDataChangeStoreId = tab.dataset.dataChangeStoreId || "all";
+  renderDataChangeTable();
+});
 allProductsButton.addEventListener("click", clearSelectedStore);
 
 storeList.addEventListener("click", (event) => {
