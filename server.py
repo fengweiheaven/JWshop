@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import re
 import sys
 import threading
@@ -41,9 +42,27 @@ def get_runtime_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+def get_persistent_data_dir() -> Path:
+    if sys.platform == "darwin":
+        path = Path.home() / "Library" / "Application Support" / "JWshop"
+    elif sys.platform.startswith("win"):
+        appdata = os.environ.get("APPDATA")
+        path = Path(appdata) / "JWshop" if appdata else Path.home() / "AppData" / "Roaming" / "JWshop"
+    else:
+        path = Path.home() / ".jwshop"
+
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 BASE_DIR = get_resource_dir()
 RUNTIME_DIR = get_runtime_dir()
+PERSISTENT_DATA_DIR = get_persistent_data_dir()
 DEFAULT_PORT = 8765
+LEGACY_USER_DATA_FILE = RUNTIME_DIR / "user-data.json"
+USER_DATA_FILE = PERSISTENT_DATA_DIR / "user-data.json"
+USER_DATA_BACKUP_FILE = PERSISTENT_DATA_DIR / "user-data.backup.json"
+USER_DATA_TEMP_FILE = PERSISTENT_DATA_DIR / "user-data.tmp.json"
 
 COLUMN_ALIASES = {
     "date": [
@@ -587,20 +606,120 @@ def parse_multipart_file(headers: Any, body: bytes) -> tuple[str, bytes]:
     raise UserFacingError("没有收到表格文件。")
 
 
+def read_json_body(headers: Any, body: bytes) -> dict[str, Any]:
+    content_type = headers.get("Content-Type", "")
+    if "application/json" not in content_type:
+        raise UserFacingError("Request content type must be application/json.")
+
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise UserFacingError("JSON body could not be parsed.") from exc
+
+    if not isinstance(payload, dict):
+        raise UserFacingError("JSON body must be an object.")
+    return payload
+
+
+def normalize_user_data_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    storage = payload.get("storage", {})
+    if not isinstance(storage, dict):
+        raise UserFacingError("User data storage must be an object.")
+
+    normalized_storage: dict[str, str] = {}
+    for key, value in storage.items():
+        if not isinstance(key, str) or not key.startswith("inventory-tool-"):
+            continue
+        normalized_storage[key] = "" if value is None else str(value)
+
+    return {
+        "version": 1,
+        "savedAt": datetime.now().isoformat(timespec="seconds"),
+        "storage": normalized_storage,
+    }
+
+
+def migrate_legacy_user_data_file() -> None:
+    if USER_DATA_FILE.exists() or LEGACY_USER_DATA_FILE == USER_DATA_FILE:
+        return
+    if not LEGACY_USER_DATA_FILE.exists():
+        return
+
+    USER_DATA_FILE.write_text(LEGACY_USER_DATA_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+
+
+def read_user_data_file() -> dict[str, Any] | None:
+    migrate_legacy_user_data_file()
+
+    if not USER_DATA_FILE.exists():
+        return None
+
+    with USER_DATA_FILE.open("r", encoding="utf-8") as file:
+        payload = json.load(file)
+    if not isinstance(payload, dict):
+        raise UserFacingError("Local user data file has an invalid format.")
+    return payload
+
+
+def write_user_data_file(payload: dict[str, Any]) -> dict[str, Any]:
+    data = normalize_user_data_payload(payload)
+    USER_DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    if USER_DATA_FILE.exists():
+        USER_DATA_BACKUP_FILE.write_text(USER_DATA_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+
+    USER_DATA_TEMP_FILE.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    USER_DATA_TEMP_FILE.replace(USER_DATA_FILE)
+    return data
+
+
 class InventoryToolHandler(SimpleHTTPRequestHandler):
     server_version = "InventoryTool/1.0"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, directory=str(BASE_DIR), **kwargs)
 
+    def do_GET(self) -> None:
+        if self.path == "/api/user-data":
+            try:
+                data = read_user_data_file()
+                self.send_json(
+                    {
+                        "ok": True,
+                        "exists": data is not None,
+                        "path": str(USER_DATA_FILE),
+                        "data": data,
+                    }
+                )
+            except UserFacingError as exc:
+                self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            except Exception as exc:  # pragma: no cover - keeps UI friendly.
+                self.send_json(
+                    {"ok": False, "error": f"Load failed: {exc}"},
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+            return
+
+        super().do_GET()
+
     def do_POST(self) -> None:
-        if self.path != "/api/analyze":
+        if self.path not in {"/api/analyze", "/api/user-data"}:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
 
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(content_length)
+
+            if self.path == "/api/user-data":
+                payload = read_json_body(self.headers, body)
+                data = write_user_data_file(payload)
+                self.send_json({"ok": True, "path": str(USER_DATA_FILE), "data": data})
+                return
+
             filename, content = parse_multipart_file(self.headers, body)
             payload = parse_table(filename, content)
             self.send_json({"ok": True, "data": payload})
@@ -624,9 +743,9 @@ class InventoryToolHandler(SimpleHTTPRequestHandler):
 
 def ensure_background_logs() -> None:
     if sys.stdout is None:
-        sys.stdout = (RUNTIME_DIR / "server.out.log").open("a", encoding="utf-8", buffering=1)
+        sys.stdout = (PERSISTENT_DATA_DIR / "server.out.log").open("a", encoding="utf-8", buffering=1)
     if sys.stderr is None:
-        sys.stderr = (RUNTIME_DIR / "server.err.log").open("a", encoding="utf-8", buffering=1)
+        sys.stderr = (PERSISTENT_DATA_DIR / "server.err.log").open("a", encoding="utf-8", buffering=1)
 
 
 def open_browser_later(port: int) -> None:

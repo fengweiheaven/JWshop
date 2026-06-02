@@ -4,6 +4,10 @@ dist/
 dist-web/
 __pycache__/
 
+user-data.json
+user-data.backup.json
+user-data.tmp.json
+
 *.log
 *.err
 *.out

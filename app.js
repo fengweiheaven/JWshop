@@ -110,6 +110,9 @@ const DATA_KEY = "inventory-tool-parsed-data-v1";
 const FINANCE_DATA_KEY = "inventory-tool-finance-data-v4";
 const SALES_DATA_KEY = "inventory-tool-sales-data-v1";
 const FINANCE_STORE_SELECTION_KEY = "inventory-tool-finance-selected-store-v1";
+const STORAGE_PREFIX = "inventory-tool-";
+const USER_DATA_API = "/api/user-data";
+const USER_DATA_SYNC_MARKER_KEY = "inventory-tool-user-data-file-saved-at-v1";
 const FINANCE_MANUAL_SOURCE_ID = "finance-manual-entry-source";
 const FINANCE_MANUAL_SOURCE_FILENAME = "手动添加";
 const LEGACY_FINANCE_DATA_KEYS = [
@@ -331,6 +334,10 @@ let storeDragStartY = 0;
 let hasStoreDragMoved = false;
 let suppressStoreClick = false;
 let storeState = loadStoreState();
+let isApplyingUserDataFile = false;
+let isUserDataFileSyncReady = false;
+let userDataFileSaveTimer = null;
+let userDataStorageHookInstalled = false;
 
 const numberFormatter = new Intl.NumberFormat("zh-CN", {
   useGrouping: false,
@@ -927,6 +934,162 @@ function parseJsonFromStorage(key, fallback = null) {
   } catch {
     return fallback;
   }
+}
+
+function isUserDataStorageKey(key) {
+  return typeof key === "string" && key.startsWith(STORAGE_PREFIX);
+}
+
+function collectUserDataStorage() {
+  const storage = {};
+
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (!isUserDataStorageKey(key)) continue;
+    storage[key] = localStorage.getItem(key) || "";
+  }
+
+  return storage;
+}
+
+function getStoredStoreCount(storage) {
+  try {
+    const state = JSON.parse(storage?.[STORE_KEY] || "{}");
+    return Array.isArray(state.stores) ? state.stores.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function getFinanceStorageKeys() {
+  return Object.values(FINANCE_SUBMODULES).map((config) => config.dataKey);
+}
+
+function hasMeaningfulUserData(storage) {
+  if (!storage || typeof storage !== "object") return false;
+  if (getStoredStoreCount(storage) > 0) return true;
+
+  const directDataKeys = [DATA_KEY, SALES_DATA_KEY, ...getFinanceStorageKeys()];
+  if (directDataKeys.some((key) => Boolean(storage[key]))) return true;
+
+  return Object.entries(storage).some(([key, value]) => {
+    return key.startsWith("inventory-tool-finance-") && key.includes("::store::") && Boolean(value);
+  });
+}
+
+function setUserDataSyncMarker(savedAt) {
+  if (!savedAt) return;
+
+  const wasApplying = isApplyingUserDataFile;
+  isApplyingUserDataFile = true;
+  try {
+    localStorage.setItem(USER_DATA_SYNC_MARKER_KEY, String(savedAt));
+  } finally {
+    isApplyingUserDataFile = wasApplying;
+  }
+}
+
+function compareSavedAt(left, right) {
+  if (!left || !right) return 0;
+  return String(left).localeCompare(String(right));
+}
+
+function applyUserDataStorage(storage, savedAt = "") {
+  if (!storage || typeof storage !== "object") return;
+
+  isApplyingUserDataFile = true;
+  try {
+    const keysToRemove = [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (isUserDataStorageKey(key) && !Object.prototype.hasOwnProperty.call(storage, key)) {
+        keysToRemove.push(key);
+      }
+    }
+
+    keysToRemove.forEach((key) => localStorage.removeItem(key));
+    Object.entries(storage).forEach(([key, value]) => {
+      if (isUserDataStorageKey(key)) {
+        localStorage.setItem(key, String(value ?? ""));
+      }
+    });
+    if (savedAt) {
+      localStorage.setItem(USER_DATA_SYNC_MARKER_KEY, String(savedAt));
+    }
+  } finally {
+    isApplyingUserDataFile = false;
+  }
+}
+
+async function fetchUserDataFile() {
+  if (window.location.protocol === "file:") return null;
+
+  try {
+    const response = await fetch(USER_DATA_API, { cache: "no-store" });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    return payload?.ok ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveUserDataFileNow() {
+  if (window.location.protocol === "file:") return;
+
+  const storage = collectUserDataStorage();
+  try {
+    const response = await fetch(USER_DATA_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ storage }),
+    });
+    if (!response.ok) return;
+
+    const payload = await response.json();
+    if (payload?.ok) {
+      setUserDataSyncMarker(payload.data?.savedAt);
+    }
+  } catch {
+    // The app keeps working with browser storage if the local service is not reachable.
+  }
+}
+
+function scheduleUserDataFileSave() {
+  if (!isUserDataFileSyncReady || isApplyingUserDataFile) return;
+
+  window.clearTimeout(userDataFileSaveTimer);
+  userDataFileSaveTimer = window.setTimeout(saveUserDataFileNow, 350);
+}
+
+function installUserDataStorageHook() {
+  if (userDataStorageHookInstalled || !window.Storage) return;
+  userDataStorageHookInstalled = true;
+
+  const originalSetItem = Storage.prototype.setItem;
+  const originalRemoveItem = Storage.prototype.removeItem;
+  const originalClear = Storage.prototype.clear;
+
+  Storage.prototype.setItem = function setItemWithUserDataSync(key, value) {
+    originalSetItem.call(this, key, value);
+    if (this === localStorage && isUserDataStorageKey(key)) {
+      scheduleUserDataFileSave();
+    }
+  };
+
+  Storage.prototype.removeItem = function removeItemWithUserDataSync(key) {
+    originalRemoveItem.call(this, key);
+    if (this === localStorage && isUserDataStorageKey(key)) {
+      scheduleUserDataFileSave();
+    }
+  };
+
+  Storage.prototype.clear = function clearWithUserDataSync() {
+    originalClear.call(this);
+    if (this === localStorage) {
+      scheduleUserDataFileSave();
+    }
+  };
 }
 
 function normalizeStoreState(saved = {}) {
@@ -4894,39 +5057,90 @@ salesDropZone.addEventListener("drop", (event) => {
   uploadSalesFiles(event.dataTransfer.files);
 });
 
-setRandomHeadline();
-setActiveModule("inventory");
-clearLegacyFinanceData();
+function loadApplicationDataFromStorage(options = {}) {
+  const { initial = false } = options;
 
-const restoredParsedData = loadPersistedParsedData();
-if (restoredParsedData) {
-  renderParsedData(restoredParsedData.data, {
-    persist: false,
-    restore: true,
-    selectedDate: restoredParsedData.selectedDate,
-  });
-} else {
-  renderSourceTableList();
-  renderStoreList();
+  if (initial) {
+    setRandomHeadline();
+    setActiveModule("inventory");
+  }
+
+  clearLegacyFinanceData();
+  storeState = loadStoreState();
+
+  const restoredParsedData = loadPersistedParsedData();
+  if (restoredParsedData) {
+    renderParsedData(restoredParsedData.data, {
+      persist: false,
+      restore: true,
+      selectedDate: restoredParsedData.selectedDate,
+    });
+  } else {
+    resetResult();
+    renderSourceTableList();
+    renderStoreList();
+  }
+
+  loadPersistedFinanceStoreData();
+  activeFinanceStoreId = getDefaultFinanceStoreId();
+  if (activeFinanceStoreId) {
+    localStorage.setItem(FINANCE_STORE_SELECTION_KEY, activeFinanceStoreId);
+  }
+  syncActiveFinanceBucket();
+  renderFinanceStoreList();
+
+  if (financeData) {
+    renderFinanceData(financeData, { persist: false });
+  } else {
+    resetFinanceResult(undefined, { clearPersisted: false });
+  }
+
+  const restoredSalesData = loadPersistedSalesData();
+  if (restoredSalesData) {
+    renderSalesData(restoredSalesData, { persist: false });
+  } else {
+    resetSalesResult();
+  }
 }
 
-loadPersistedFinanceStoreData();
-activeFinanceStoreId = getDefaultFinanceStoreId();
-if (activeFinanceStoreId) {
-  localStorage.setItem(FINANCE_STORE_SELECTION_KEY, activeFinanceStoreId);
-}
-syncActiveFinanceBucket();
-renderFinanceStoreList();
+async function initializeUserDataFileSync() {
+  if (window.location.protocol === "file:") {
+    appendWarningText(
+      "当前是直接打开文件，店铺和源数据只能保存在当前浏览器；请使用 start.bat 或 http://127.0.0.1:8765/ 打开，才能写入固定本地数据文件。",
+    );
+    isUserDataFileSyncReady = true;
+    installUserDataStorageHook();
+    return;
+  }
 
-if (financeData) {
-  renderFinanceData(financeData, { persist: false });
-} else {
-  resetFinanceResult(undefined, { clearPersisted: false });
+  const localStorageSnapshot = collectUserDataStorage();
+  const localHasData = hasMeaningfulUserData(localStorageSnapshot);
+  const remote = await fetchUserDataFile();
+  const remoteStorage = remote?.data?.storage || {};
+  const remoteHasData = Boolean(remote?.exists && hasMeaningfulUserData(remoteStorage));
+  const remoteSavedAt = remote?.data?.savedAt || "";
+  const localSyncedAt = localStorageSnapshot[USER_DATA_SYNC_MARKER_KEY] || "";
+
+  if (remoteHasData && (!localHasData || !localSyncedAt)) {
+    applyUserDataStorage(remoteStorage, remoteSavedAt);
+    loadApplicationDataFromStorage();
+  } else if (localHasData && (!remote?.exists || !remoteHasData)) {
+    await saveUserDataFileNow();
+  } else if (localHasData && remoteHasData) {
+    const savedAtDiff = compareSavedAt(remoteSavedAt, localSyncedAt);
+    if (savedAtDiff > 0) {
+      applyUserDataStorage(remoteStorage, remoteSavedAt);
+      loadApplicationDataFromStorage();
+    } else if (savedAtDiff < 0) {
+      await saveUserDataFileNow();
+    } else {
+      setUserDataSyncMarker(remoteSavedAt);
+    }
+  }
+
+  isUserDataFileSyncReady = true;
+  installUserDataStorageHook();
 }
 
-const restoredSalesData = loadPersistedSalesData();
-if (restoredSalesData) {
-  renderSalesData(restoredSalesData, { persist: false });
-} else {
-  resetSalesResult();
-}
+loadApplicationDataFromStorage({ initial: true });
+initializeUserDataFileSync();
